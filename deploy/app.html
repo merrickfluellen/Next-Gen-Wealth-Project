@@ -5430,7 +5430,9 @@ const kqProWorlds = (makeQuiz) => curriculum.map((unit, ui) => ({
   lessons: unit.lessons.map(l => ({ id:'p' + l.id, srcId:l.id, title:l.title, icon:'📘', pro:true, cards: kqCardsFromContent(l.content),
     quiz: PRO_QUIZZES[l.id] || makeQuiz(l).map(q => ({ type:'mc', q:q.q, options:q.options, answer:q.answer, explain:'The answer is: ' + q.options[q.answer] })) }))
 }));
-const kqLiveStreak = (st) => { const t = kqDayNum(); if (st.lastDay === null) return 0; if (st.lastDay >= t - 1) return st.streak; if (st.lastDay === t - 2 && st.shields > 0) return st.streak; return 0; };
+// Day number that never runs backwards: winding the device clock back can't re-open today's goal bonus, jar interest or streak
+const kqToday = (st) => Math.max(kqDayNum(), st.lastDay || 0, st.goalDay || 0, st.jarDay || 0);
+const kqLiveStreak = (st) => { const t = kqToday(st); if (st.lastDay === null) return 0; if (st.lastDay >= t - 1) return st.streak; if (st.lastDay === t - 2 && st.shields > 0) return st.streak; return 0; };
 
 let _kqCtx = null;
 const kqSound = (kind) => {
@@ -5749,7 +5751,7 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
   const all = worlds.flatMap(w => w.lessons.map(l => ({ l, w })));
   const unlocked = (idx) => idx === 0 || lessonStars(all[idx - 1].l) > 0 || lessonStars(all[idx].l) > 0 || (track === 'pro' && worldStart[all[idx].w.id] === idx);
   const nextIdx = all.findIndex(x => !lessonStars(x.l));
-  const today = kqDayNum();
+  const today = kqToday(st);
   const goalXp = st.goalDay === today ? st.goalXp : 0;
   const lv = kqLevel(st.xp);
   const lvPct = ((st.xp - kqLevelStart(lv)) / (kqLevelStart(lv + 1) - kqLevelStart(lv))) * 100;
@@ -5757,7 +5759,8 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
   const totalStars = Object.values(st.stars).reduce((a, b) => a + b, 0);
 
   const toggleMute = () => { const m = !muted; setMuted(m); try { localStorage.setItem('kqMute', m ? '1' : '0'); } catch {} };
-  const start = (item) => { kqSound('tap'); setActive(item); setScreen('lesson'); };
+  const doneRef = React.useRef(false);   // one reward per lesson run, even if Continue fires twice
+  const start = (item) => { kqSound('tap'); doneRef.current = false; setActive(item); setScreen('lesson'); };
 
   // Deep link from elsewhere in the app (daily missions, crypto resources) into a Pro lesson
   useEffect(() => {
@@ -5767,6 +5770,8 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
   }, [launchPro && launchPro.id]);
 
   const done = (r) => {
+    if (doneRef.current || !active) return;
+    doneRef.current = true;
     const first = !lessonStars(active.l);
     const improved = !first && r.stars > lessonStars(active.l);
     const gift = first || improved;
