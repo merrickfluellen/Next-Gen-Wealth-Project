@@ -346,40 +346,49 @@ function withFirewall(handler, options = {}) {
 }
 
 /**
- * ReDoS regression check: every signature must stay linear. Each pattern is timed against 50 KB
- * adversarial strings (the production scan is capped at 4 KB, this tests the patterns themselves).
- * Returns [{ pattern, input, ms }] for every case slower than `limitMs`.
+ * ReDoS regression check: every signature must stay linear. Each pattern is timed against
+ * adversarial strings grown step by step up to 50 KB (the production scan is capped at 4 KB; this
+ * tests the patterns themselves). Sizes grow in small steps first, so an exponential pattern is
+ * caught at a few hundred bytes instead of hanging the check. Returns [{ pattern, input, bytes, ms }]
+ * for each pattern/input that exceeded `limitMs`.
  */
-function selfTest(limitMs = 50) {
-  const N = 50 * 1024;
-  const fill = (unit) => unit.repeat(Math.ceil(N / unit.length)).slice(0, N);
-  const inputs = {
-    'union+comments': 'union' + fill('/**/') + 'x',
-    'union+open-comments': 'union' + fill('/*') + 'x',
-    'union+stars': 'union /*' + fill('*') + 'x',
-    'union+spaces': 'union' + fill(' ') + 'x',
-    'unions': fill('union '),
-    'quote-or': fill("' or "),
-    'quote-spaces': "'" + fill(' ') + 'or 1=',
-    'or-digits': "' or 1" + fill('1') + 'x',
-    'sleep(': fill('sleep ('),
-    'semicolon-drop': fill('; drop '),
-    'jndi': fill('${ jndi'),
-    'script': fill('< script'),
-    'javascript': fill('javascript '),
-    'traversal': fill('..%2e%2'),
-    'etc': fill('/etc/'),
-    'percent': fill('%'),
-    'word-chars': fill('a'),
-    'mixed': fill("union/*a*/ ' or '1'='"),
+function selfTest(limitMs = 50, patterns = ATTACK_PATTERNS) {
+  const MAX = 50 * 1024;
+  const sizes = [];
+  for (let n = 16; n < 512; n += 8) sizes.push(n);
+  for (let n = 512; n < MAX; n *= 2) sizes.push(n);
+  sizes.push(MAX);
+  const fill = (unit, n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n);
+  const gens = {
+    'union+comments': (n) => 'union' + fill('/**/', n) + 'x',
+    'union+open-comments': (n) => 'union' + fill('/*', n) + 'x',
+    'union+stars': (n) => 'union /*' + fill('*', n) + 'x',
+    'union+spaces': (n) => 'union' + fill(' ', n) + 'x',
+    'unions': (n) => fill('union ', n),
+    'quote-or': (n) => fill("' or ", n),
+    'quote-spaces': (n) => "'" + fill(' ', n) + 'or 1=',
+    'or-digits': (n) => "' or 1" + fill('1', n) + 'x',
+    'sleep(': (n) => fill('sleep (', n),
+    'semicolon-drop': (n) => fill('; drop ', n),
+    'jndi': (n) => fill('${ jndi', n),
+    'script': (n) => fill('< script', n),
+    'javascript': (n) => fill('javascript ', n),
+    'traversal': (n) => fill('..%2e%2', n),
+    'etc': (n) => fill('/etc/', n),
+    'percent': (n) => fill('%', n),
+    'word-chars': (n) => fill('a', n),
+    'mixed': (n) => fill("union/*a*/ ' or '1'='", n),
   };
   const slow = [];
-  for (const re of ATTACK_PATTERNS) {
-    for (const [label, s] of Object.entries(inputs)) {
-      const t0 = process.hrtime.bigint();
-      re.test(s);
-      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-      if (ms > limitMs) slow.push({ pattern: String(re), input: label, ms: Math.round(ms) });
+  for (const re of patterns) {
+    for (const [label, gen] of Object.entries(gens)) {
+      for (const n of sizes) {
+        const s = gen(n);
+        const t0 = process.hrtime.bigint();
+        re.test(s);
+        const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+        if (ms > limitMs) { slow.push({ pattern: String(re), input: label, bytes: s.length, ms: Math.round(ms) }); break; }
+      }
     }
   }
   return slow;

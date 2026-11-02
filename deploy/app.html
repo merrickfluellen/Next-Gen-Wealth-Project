@@ -55,8 +55,6 @@ window.deferredInstallPrompt = ev;
          No third-party script runs on this page, so a CDN compromise cannot read the session token. -->
     <script src="/vendor/react@18.3.1/react.production.min.js"></script>
     <script src="/vendor/react-dom@18.3.1/react-dom.production.min.js"></script>
-    <!-- Prebuilt Tailwind stylesheet (replaces the Play CDN runtime compiler) -->
-    <link rel="stylesheet" href="/tailwind.css">
     <!-- Leaflet 1.9.4 (Money City MLS map) -->
     <link rel="stylesheet" href="/vendor/leaflet@1.9.4/leaflet.css">
     <script src="/vendor/leaflet@1.9.4/leaflet.js"></script>
@@ -881,6 +879,9 @@ progress {
 .mqw-stick i { position:absolute; left:28px; top:28px; width:36px; height:36px; border-radius:50%; background:rgba(255,200,61,0.85); }
 .mqw-gfx { background:rgba(11,16,48,0.86); color:#fff; border:1.5px solid rgba(255,255,255,0.25); border-radius:999px; padding:4px 10px; font-weight:800; font-size:12px; cursor:pointer; }
 </style>
+<!-- Prebuilt Tailwind stylesheet (replaces the Play CDN runtime compiler). Last in <head>, where the Play CDN
+     injected its styles, so the cascade order against the app's own <style> rules is unchanged. -->
+<link rel="stylesheet" href="/tailwind.css">
 </head>
 <body>
     <div class="bg-top-glow"></div>
@@ -2109,7 +2110,7 @@ window.MQW = window.MQW || {};
 (function (MQW) {
   const VERSION = 1;
   MQW.Save = ({ key, cloudLoad, cloudSave }) => {
-    let cloudTimer = null;
+    let cloudTimer = null, queued = null;
     const valid = (s) => s && typeof s === 'object' && typeof s.scene === 'string' && isFinite(s.x) && isFinite(s.y);
     const readLocal = () => { try { const s = JSON.parse(localStorage.getItem(key) || 'null'); return valid(s) ? s : null; } catch { return null; } };
     return {
@@ -2124,10 +2125,12 @@ window.MQW = window.MQW || {};
         const s = Object.assign({ v: VERSION }, state, { savedAt: Date.now() });
         try { localStorage.setItem(key, JSON.stringify(s)); } catch {}
         if (!cloudSave) return;
-        clearTimeout(cloudTimer);
-        if (opts && opts.now) cloudSave(s); else cloudTimer = setTimeout(() => cloudSave(s), 3000);
+        clearTimeout(cloudTimer); queued = null;
+        if (opts && opts.now) cloudSave(s); else { queued = s; cloudTimer = setTimeout(() => { queued = null; cloudSave(s); }, 3000); }
       },
-      flush(state) { clearTimeout(cloudTimer); if (cloudSave && state) cloudSave(Object.assign({ v: VERSION }, state, { savedAt: Date.now() })); },
+      // Send a save still waiting on the timer now (sign-out / tab closing run this before the final Cloud flush)
+      flushPending() { clearTimeout(cloudTimer); if (queued && cloudSave) { const s = queued; queued = null; cloudSave(s); } },
+      flush(state) { clearTimeout(cloudTimer); queued = null; if (cloudSave && state) cloudSave(Object.assign({ v: VERSION }, state, { savedAt: Date.now() })); },
     };
   };
 
@@ -2250,13 +2253,17 @@ window.MQ = window.MQ || {};
   const payment = (principal, apr, months) => { const r = apr / 100 / 12; return r2(r ? principal * r / (1 - Math.pow(1 + r, -months)) : principal / months); };
   const monthsDue = (last, now) => Math.floor((now - last) / DAY);
 
-  // Savings: monthly compounding at APY/12 per sim month
+  // Savings: monthly compounding at APY/12 per sim month, paid on the LOWEST balance since the last interest date
+  // (sav.minBal, kept by deposits/withdrawals), like a real minimum-balance account: money parked in savings seconds
+  // before the month ends earns nothing for that month.
   const accrueSavings = (sav, now) => {
     const last = sav.lastAccrue || now, months = monthsDue(last, now);
-    if (months < 1 || !(sav.balance > 0)) return { sav: Object.assign({}, sav, { lastAccrue: months >= 1 ? now : last }), interest: 0 };
+    if (months < 1 || !(sav.balance > 0)) return { sav: Object.assign({}, sav, months >= 1 ? { lastAccrue: now, minBal: Math.max(0, sav.balance || 0) } : { lastAccrue: last }), interest: 0 };
     const m = Math.min(CATCHUP, months);
-    const balance = r2(sav.balance * Math.pow(1 + apyNow() / 100, m / 12));   // APY is the true yearly growth
-    return { sav: Object.assign({}, sav, { balance, earned: r2((sav.earned || 0) + balance - sav.balance), lastAccrue: months > CATCHUP ? now : last + months * DAY }), interest: r2(balance - sav.balance) };
+    const low = typeof sav.minBal === 'number' && Number.isFinite(sav.minBal) ? Math.max(0, Math.min(sav.balance, sav.minBal)) : sav.balance;
+    const interest = r2(low * (Math.pow(1 + apyNow() / 100, m / 12) - 1));   // APY is the true yearly growth
+    const balance = r2(sav.balance + interest);
+    return { sav: Object.assign({}, sav, { balance, minBal: balance, earned: r2((sav.earned || 0) + interest), lastAccrue: months > CATCHUP ? now : last + months * DAY }), interest };
   };
 
   // Loans: each sim month interest is added, then a payment is due.
@@ -2639,6 +2646,7 @@ window.MQ = window.MQ || {};
     const count = Math.floor((now - mk.lastMonth) / DAY);
     if (count < 1) return null;
     mk = JSON.parse(JSON.stringify(mk));
+    mk.companies.forEach(c => { delete c.flow; delete c.p0; });   // a new month: this month's order flow is priced in, start fresh
     const m = Math.min(CATCHUP, count), news = [], divs = {}, bankrupt = [];
     mk.corp = mk.corp || {};
     const say = (h, b, t) => news.push({ t, h, b });
@@ -2726,10 +2734,27 @@ window.MQ = window.MQ || {};
   };
   // Big orders move the price ("square-root" market-impact rule). Returns the extra % paid (buy) / lost (sell).
   const impact = (c, shares) => { const adv = c.shares * 1e6 * 0.002, d = def(c.t); return clamp(d.vol * 0.25 * Math.sqrt(Math.max(0, shares) / adv), 0, 0.6); };
+  // Player orders use the same square-root rule, but on the CUMULATIVE net flow (signed shares) this sim month, so how
+  // an order is split does not matter: c.p0 is the price before any flow, the price is p0·(1 ± ½·impact(|flow|)), and an
+  // order pays the integral of that price over the flow it adds. Ten small buys cost exactly what one big buy costs,
+  // and buying then selling back the same shares returns the flow (and price) to where it was, minus the spread.
+  const flowJ = (c, af) => {   // ∫0..af of ½·impact(y) dy, as a fraction of p0
+    const adv = c.shares * 1e6 * 0.002, a = def(c.t).vol * 0.25, fmax = adv * Math.pow(0.6 / a, 2), x = Math.min(af, fmax);
+    return 0.5 * a / Math.sqrt(adv) * (2 / 3) * Math.pow(x, 1.5) + 0.3 * Math.max(0, af - x);
+  };
+  const flowH = (c, f) => f + flowJ(c, Math.abs(f));
+  const flowPrice = (c, p0, f) => p0 * (1 + 0.5 * Math.sign(f) * impact(c, Math.abs(f)));
+  const trade = (c, qty, buy, now) => {
+    const F0 = Number.isFinite(c.flow) ? c.flow : 0, p0 = Number.isFinite(c.p0) && c.p0 > 0 ? c.p0 : c.price, F1 = F0 + (buy ? qty : -qty);
+    const q = quote(c, now), ratio = (buy ? q.ask : q.bid) / c.price;   // spread + intraday wiggle around the current price
+    const gross = p0 * Math.abs(flowH(c, F1) - flowH(c, F0)) * ratio;
+    const price = Math.max(0.5, r2(flowPrice(c, p0, F1)));
+    return { gross, px: qty > 0 ? gross / qty : q.price, flow: F1, p0, price, imp: Math.abs(price / c.price - 1) * 2 };
+  };
   const TIERS = [[100, 'Private owner (100%)'], [90, 'Near-total control (90%+)'], [75, 'Strong control (75%+)'], [51, 'CONTROLLING shareholder (51%+)'], [25, 'Large influence (25%+)'], [10, 'Significant influence (10%+)'], [5, 'Major shareholder (5%+ · must file a 13D with the SEC)'], [1, 'Notable shareholder (1%+)'], [0, 'Small shareholder']];
   const tier = (pct) => (TIERS.find(([min]) => pct >= min) || TIERS[TIERS.length - 1])[1];
   const indexLevel = (mk) => { const caps = mk.companies.reduce((s, c) => s + c.price * c.shares, 0); return caps; };
-  MQ.Market = { COMPANIES, init, runMonths, quote, impact, metrics, fairValue: (c, macro) => fairValue(c, def(c.t), macro), tier, indexLevel, def, ttm };
+  MQ.Market = { COMPANIES, init, runMonths, quote, impact, trade, metrics, fairValue: (c, macro) => fairValue(c, def(c.t), macro), tier, indexLevel, def, ttm };
 })(window.MQ);
 </script>
 <script>/* ═══ MQ.Corp · CorporateManager + BoardMeetingManager (pure; no UI) ═════════════════════════════════
@@ -2956,8 +2981,9 @@ const tokenClaims = (t) => {
   try { const p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return p && typeof p === 'object' ? p : null; }
   catch { return null; }
 };
-const apiCall = async (fn, { method = 'GET', body, token, auth = true, timeoutMs = 15000, keepalive = false } = {}) => {
+const apiCall = async (fn, { method = 'GET', body, token, auth = true, timeoutMs = 15000, keepalive = false, expectUser = '' } = {}) => {
   const headers = { Accept: 'application/json' };
+  if (expectUser) headers['X-Expected-User'] = expectUser;   // the server refuses a token for any other account (409)
   const tk = token !== undefined ? token : (auth ? getToken() : '');
   if (tk) headers.Authorization = 'Bearer ' + tk;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -3020,6 +3046,52 @@ const clearOtherUsersData = (email) => {
   } catch {}
 };
 
+// ── One writer tab per device ────────────────────────────────────────────────────────────────────────────────
+// Every tab keeps its own React state and writes only the keys/columns it changed, so two open tabs of the app used to
+// merge into a save that never existed (cash from one tab + savings from the other = duplicated money), and a tab left
+// open after another tab switched accounts kept saving into the new account's row. Now the tab that signed in or opened
+// last claims the device (localStorage mqActiveTab); every other tab freezes: no more saves, no localStorage writes,
+// and a screen that offers to reload. A tab also freezes if the stored token stops matching its account.
+const TabGuard = (() => {
+  const KEY = 'mqActiveTab';
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  let email = '', frozen = '', onFreeze = () => {};
+  // A frozen tab must not touch the shared device copy any more (its React state is stale).
+  try {
+    const S = window.Storage && Storage.prototype, set = S.setItem, del = S.removeItem, clr = S.clear;
+    S.setItem = function (k, v) { if (frozen && this === window.localStorage) return; return set.call(this, k, v); };
+    S.removeItem = function (k) { if (frozen && this === window.localStorage) return; return del.call(this, k); };
+    S.clear = function () { if (frozen && this === window.localStorage) return; return clr.call(this); };
+  } catch {}
+  const writer = () => { try { const w = JSON.parse(localStorage.getItem(KEY) || 'null'); return w && typeof w === 'object' ? w : null; } catch { return null; } };
+  const tokenSub = () => { const t = getToken(); const c = t ? tokenClaims(t) : null; return c && typeof c.sub === 'string' ? c.sub : ''; };
+  const api = {
+    id,
+    claim(em) { if (frozen || !em) return; email = em; try { localStorage.setItem(KEY, JSON.stringify({ tab: id, email: em, at: Date.now() })); } catch {} },
+    release() { email = ''; },
+    isFrozen: () => !!frozen,
+    // True while this tab may write for `em`: it holds the claim and the stored token is still that account's.
+    canWrite(em) {
+      if (frozen) return false;
+      if (!email || em !== email) return true;   // not a signed-in session tab (practice, preview, sign-in screen)
+      const w = writer();
+      if (w && w.tab !== id) { api.freeze('tab'); return false; }
+      if (tokenSub() !== email) { api.freeze(getToken() ? 'account' : 'signedout'); return false; }
+      return true;
+    },
+    freeze(reason) { if (frozen || !email) return; frozen = reason || 'tab'; try { onFreeze(frozen); } catch {} },
+    onFreeze(fn) { onFreeze = typeof fn === 'function' ? fn : () => {}; },
+  };
+  window.addEventListener('storage', (ev) => {
+    if (!email || frozen) return;
+    if (ev.key === KEY || ev.key === null) { const w = writer(); if (w && w.tab !== id) api.freeze('tab'); }
+    if (ev.key === TOKEN_KEY || ev.key === 'investedSession' || ev.key === null) {
+      const sub = tokenSub();
+      if (!sub) api.freeze('signedout'); else if (sub !== email) api.freeze('account');
+    }
+  });
+  return api;
+})();
 // Cloud progress (progress function). Saves are batched: every change is merged into one pending body that is
 // sent at most every 2 s (the server allows 120 requests/user/min). Failed saves are retried with back-off and the
 // localStorage copy is always written first, so the app keeps working offline.
@@ -3027,9 +3099,15 @@ const PROGRESS_COLS = ['lesson_notes', 'portfolio', 'completed_lessons', 'sim_da
 const Cloud = (() => {
   const SAVE_EVERY = 2000;
   let pending = {}, timer = null, busy = null, backoff = 0, solo = false, email = '';
-  let loadP = null, loadAt = 0;
+  let loadP = null, loadAt = 0, held = false;
   const missing = new Set();
   const handlers = { authLost: () => {} };
+  // Components with their own pending state (the 3D world's position save) register a flusher; it is run before every
+  // final flush (sign-out, delete, tab hidden/closed) so their last change is queued first.
+  const flushers = new Set();
+  const runFlushers = () => { flushers.forEach(fn => { try { fn(); } catch {} }); };
+  // The token must belong to this tab's account: another tab may have signed in someone else since.
+  const tokenFor = (em) => { const t = getToken(); const c = t ? tokenClaims(t) : null; return t && c && c.sub === em ? t : ''; };
   const unsyncedKey = () => 'cloudUnsynced::' + email;
   const readUnsynced = () => { const v = lsJSON(unsyncedKey(), '[]'); return new Set(Array.isArray(v) ? v.filter(c => PROGRESS_COLS.includes(c)) : []); };
   const writeUnsynced = (s) => { if (email) { if (s.size) lsSet(unsyncedKey(), JSON.stringify([...s])); else lsDel(unsyncedKey()); } };
@@ -3037,14 +3115,20 @@ const Cloud = (() => {
   const requeue = (body) => { pending = Object.assign({}, body, pending); };   // anything queued since is newer and wins
   const retryLater = (body, ms) => { requeue(body); backoff = ms; schedule(ms); };
   async function send(keepalive) {
-    const token = getToken();
     let cols = Object.keys(pending).filter(c => !missing.has(c));
-    if (!token || !email || !cols.length) { pending = {}; return; }
+    if (!email || !cols.length) { pending = {}; return; }
+    const token = tokenFor(email);
+    if (!token || !TabGuard.canWrite(email)) {   // signed out or switched account in another tab: never write elsewhere
+      pending = {};
+      if (!TabGuard.isFrozen()) TabGuard.freeze(getToken() ? 'account' : 'signedout');
+      return;
+    }
     if (solo) cols = cols.slice(0, 1);   // the server could not say which column it rejected: try them one by one
     const body = {}; cols.forEach(c => { body[c] = pending[c]; delete pending[c]; });
     const who = email;
-    const r = await apiCall('progress', { method: 'POST', body, token, keepalive, timeoutMs: 20000 });
+    const r = await apiCall('progress', { method: 'POST', body, token, keepalive, timeoutMs: 20000, expectUser: who });
     if (who !== email) return;   // signed out while the request was in flight
+    if (r.status === 409) { pending = {}; TabGuard.freeze('account'); return; }   // server: token is not this account
     if (r.status === 200) {
       backoff = 0;
       const s = readUnsynced(); cols.forEach(c => { if (!(c in pending)) s.delete(c); }); writeUnsynced(s);
@@ -3068,6 +3152,7 @@ const Cloud = (() => {
   function flush(opts) {
     const keepalive = !!(opts && opts.keepalive);
     clearTimeout(timer); timer = null;
+    if (held) return Promise.resolve();
     if (busy) { if (!keepalive) { return busy.then(() => flush()); } return busy; }
     if (!Object.keys(pending).length) return Promise.resolve();
     busy = send(keepalive).catch(() => {}).finally(() => { busy = null; });
@@ -3075,21 +3160,27 @@ const Cloud = (() => {
   }
   if (typeof window !== 'undefined') {
     window.addEventListener('online', () => { backoff = 0; if (Object.keys(pending).length) flush(); });
-    window.addEventListener('pagehide', () => flush({ keepalive: true }));
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush({ keepalive: true }); });
+    window.addEventListener('pagehide', () => { if (email) runFlushers(); flush({ keepalive: true }); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { if (email) runFlushers(); flush({ keepalive: true }); } });
   }
   return {
     // Start (or switch) the account this tab syncs. Columns left unsynced by an earlier visit are re-sent by the app.
     begin(em) { if (em !== email) { pending = {}; clearTimeout(timer); timer = null; loadP = null; missing.clear(); solo = false; backoff = 0; } email = em || ''; },
-    end() { pending = {}; clearTimeout(timer); timer = null; loadP = null; email = ''; },
+    end() { pending = {}; clearTimeout(timer); timer = null; loadP = null; email = ''; held = false; },
     onAuthLost(fn) { handlers.authLost = typeof fn === 'function' ? fn : () => {}; },
+    addFlusher(fn) { flushers.add(fn); return () => flushers.delete(fn); },
+    // Queue every component's last change, then send it all (sign-out). Resolves when the request is done.
+    flushAll() { if (email) runFlushers(); return flush(); },
+    // Stop sending while an account deletion is in progress (a late save must not recreate the row)
+    hold(on) { held = !!on; if (held) { clearTimeout(timer); timer = null; } else if (Object.keys(pending).length) schedule(SAVE_EVERY); },
     isUnsynced(col) { return !!email && readUnsynced().has(col); },
     save(cols) {
       if (!email || !cols || typeof cols !== 'object') return;
+      if (!TabGuard.canWrite(email)) { pending = {}; return; }
       const s = readUnsynced(); let added = false;
       Object.keys(cols).forEach(c => { if (PROGRESS_COLS.includes(c) && !missing.has(c)) { pending[c] = cols[c]; if (!s.has(c)) { s.add(c); added = true; } } });
       if (added) writeUnsynced(s);
-      if (!timer && !busy) schedule(backoff || SAVE_EVERY);
+      if (!timer && !busy && !held) schedule(backoff || SAVE_EVERY);
     },
     flush,
     // One GET for the whole row, shared by every caller for 20 s (the app asks for several columns at mount).
@@ -3097,8 +3188,14 @@ const Cloud = (() => {
     loadAll(fresh) {
       if (!fresh && loadP && Date.now() - loadAt < 20000) return loadP;
       const who = email; loadAt = Date.now();
-      loadP = apiCall('progress').then(r => {
+      const token = who ? tokenFor(who) : getToken();
+      if (who && !token) {   // the stored token is another account's (or gone): never read it into this tab
+        TabGuard.freeze(getToken() ? 'account' : 'signedout');
+        return (loadP = Promise.resolve({ ok: false, status: 0, progress: null }));
+      }
+      loadP = apiCall('progress', { token, expectUser: who }).then(r => {
         if (r.status === 401 && who && who === email) handlers.authLost();
+        if (r.status === 409 && who && who === email) { TabGuard.freeze('account'); return { ok: false, status: 409, progress: null }; }
         const p = r.status === 200 && r.data.progress && typeof r.data.progress === 'object' && !Array.isArray(r.data.progress) ? r.data.progress : null;
         return { ok: r.status === 200, status: r.status, progress: p };
       });
@@ -4665,7 +4762,7 @@ try {
   const prev = getSession();
   if (!prev || prev.email !== u.email) clearLocalUserData(); else { purgeLegacyData(); clearOtherUsersData(u.email); }
   setToken(r.data.token);
-  Cloud.begin(u.email);
+  Cloud.begin(u.email); TabGuard.claim(u.email);
   const pr = await Cloud.loadAll(true);
   if (!pr.ok) {
     Cloud.end(); setToken(null);
@@ -5909,24 +6006,27 @@ const KQ_NAV = [
 const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerName, tab, setTab, extraView, completedLessons, onKidFirstComplete, onProComplete, launchPro, onLaunched, worldMode, worldView, onSignOut, onSimpleMode }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [st, setSt] = useState(() => { try { return kqSanitize(lsJSON(storeKey, '{}')); } catch { return kqDefault(); } });
-  const saveTimer = React.useRef(null);
   const cloudReady = React.useRef(false);
+  const stRef = React.useRef(st); stRef.current = st;
+  const dirty = React.useRef(false);   // changed before the cloud copy was merged in: send once it is
+  // Queued straight to Cloud (which batches every 2 s), in the same render as any reward paid into Money City cash,
+  // so a lesson's "done" star and its $500 always travel in one request (a debounce here was lost on quick sign-out).
   useEffect(() => {
     try { localStorage.setItem(storeKey, JSON.stringify(st)); } catch {}
-    if (!cloudSave || !cloudReady.current) return;
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => cloudSave(st), 1500);
+    if (!cloudSave) return;
+    if (!cloudReady.current) { dirty.current = true; return; }
+    cloudSave(st);
   }, [st]);
   useEffect(() => {
     let alive = true;
-    const done = () => { cloudReady.current = true; };
+    const done = () => { cloudReady.current = true; if (dirty.current && cloudSave && alive) { dirty.current = false; cloudSave(stRef.current); } };
     if (!cloudLoad) { done(); return; }
     cloudLoad().then(cloud => {
       if (!alive) return;
-      if (cloud && typeof cloud === 'object' && !Array.isArray(cloud)) setSt(local => kqMerge(local, cloud));
+      if (cloud && typeof cloud === 'object' && !Array.isArray(cloud)) { dirty.current = false; setSt(local => kqMerge(local, cloud)); }
       done();
     }).catch(done);
-    return () => { alive = false; clearTimeout(saveTimer.current); };
+    return () => { alive = false; };
   }, []);
   const [screen, setScreen] = useState('map');     // map | lesson | results
   const [active, setActive] = useState(null);
@@ -7383,6 +7483,7 @@ const CityWorld = ({ storeKey, cloudSave, cloudLoad, track, ticker, cash, netWor
   useEffect(() => {
     if (!gfxReady || !window.MQW || !MQW.Game || !canvasRef.current) return;
     const save = MQW.Save({ key: storeKey, cloudLoad, cloudSave });
+    const offFlush = cloudSave ? Cloud.addFlusher(() => save.flushPending()) : () => {};   // sign-out sends the last position first
     const game = MQW.Game.create({ canvas: canvasRef.current, save, use3D: gfx === '3d' && MQW.has3D(), hooks: {
       requirement: (k) => k === 'pro' && live.current.track === 'junior' ? 'This spot is for teen players. Switch to 🎓 Pro Quest on the Quest map to use it.'
         : k === 'mhowner' && !live.current.mhOwner ? 'HOA meetings are for people who own a home in Maple Heights.'
@@ -7411,7 +7512,7 @@ const CityWorld = ({ storeKey, cloudSave, cloudLoad, track, ticker, cash, netWor
     ];
     setIs3D(!!game.is3D);
     game.start();
-    return () => { offs.forEach(f => f()); clearTimeout(toastT); game.destroy(); gameRef.current = null; };
+    return () => { offs.forEach(f => f()); clearTimeout(toastT); game.destroy(); offFlush(); gameRef.current = null; };
   }, [gfxReady, gfx]);
   const switchGfx = () => { const g = gfx === '3d' ? '2d' : '3d'; try { localStorage.setItem('mqwGfx', g); } catch {} setGfx(g); };
 
@@ -7722,9 +7823,10 @@ const handleBuyCrypto = () => {
   trackEvent('buy_crypto', {sym:coin.sym, qty, cost});
   setCryptoBuyModal(null); setCryptoBuyQty('');
 };
-// Owned properties + tenants: localStorage right away, Supabase progress.real_estate debounced (1.5s)
+// Owned properties + tenants: localStorage right away, and queued to the cloud in the same render as the cash change
+// that went with it (Cloud batches every column queued together into ONE request). The old 1.5 s per-component timer
+// was cancelled on unmount, so a quick sign-out saved the cash side of a sale but not the property side.
 const reSkipStamp = React.useRef(true);   // first run = hydration from localStorage, not a user change
-const reSaveTimer = React.useRef(null);
 useEffect(() => {
   const re = reScrubRE(myProps, reTenants);   // a home's street address / exact location never reaches storage
   lsSet(k('myProps'), JSON.stringify(re.myProps));
@@ -7733,10 +7835,8 @@ useEffect(() => {
   const savedAt = Date.now();
   lsSet(k('reSavedAt'), String(savedAt));
   if (user.practice) return;
-  clearTimeout(reSaveTimer.current);
-  reSaveTimer.current = setTimeout(() => dbSaveRealEstate({ myProps: re.myProps, reTenants: re.reTenants, savedAt }), 1500);
+  dbSaveRealEstate({ myProps: re.myProps, reTenants: re.reTenants, savedAt });
 }, [myProps, reTenants]);
-useEffect(() => () => clearTimeout(reSaveTimer.current), []);
 useEffect(() => {
   if (user.practice) return;
   let alive = true;
@@ -7763,16 +7863,8 @@ useEffect(() => { localStorage.setItem(k('loans'), JSON.stringify(loans)); }, [l
 useEffect(() => { localStorage.setItem(k('bank'), JSON.stringify(bank)); }, [bank]);
 useEffect(() => { localStorage.setItem(k('econ'), JSON.stringify(econ)); }, [econ]);
 useEffect(() => { localStorage.setItem(k('market'), JSON.stringify(market)); }, [market]);
-// Economy cloud save: bank + loans + bonds (debounced); on load the newer copy wins
-const econSkip = React.useRef(true), econTimer = React.useRef(null);
-useEffect(() => {
-  if (econSkip.current) { econSkip.current = false; return; }
-  const savedAt = Date.now(); localStorage.setItem(k('econSavedAt'), String(savedAt));
-  if (user.practice) return;
-  clearTimeout(econTimer.current);
-  econTimer.current = setTimeout(() => dbSaveEconomy(user.email, { bank, loans, myBonds, econ, market, savedAt }), 1500);
-}, [bank, loans, myBonds, econ, market]);
-useEffect(() => () => clearTimeout(econTimer.current), []);
+// Economy cloud save (bank, loans, bonds, econ, MCX market + extras): see the effect after the phone texts below.
+const econSkip = React.useRef(true);
 useEffect(() => {
   if (user.practice) return;
   let alive = true;
@@ -7828,17 +7920,20 @@ const sellPropertyFn = (propId) => {
 const setTenantFn = (propId, tenant) => {
   // first tenant starts the rent clock now, so the vault fills up over time instead of starting full
   if (tenant && getRentedWithTenants().length === 0) { const ts = Date.now(); setLastRentCollect(ts); localStorage.setItem(k('lastRentCollect'), ts.toString()); }
-  setReTenants(prev => ({...prev, [propId]: tenant}));
+  // each tenant pays rent from the moment they move in (rentFrom), not for the vault's whole waiting time
+  setReTenants(prev => ({...prev, [propId]: tenant ? { ...tenant, rentFrom: Date.now() } : tenant}));
   setMyProps(prev => prev.map(p => p.id === propId ? {...p, status: tenant ? 'rented' : 'vacant', tenant: tenant ? tenant.name : null} : p));
 };
 const getRentedWithTenants = () => myProps.filter(p => p.status === 'rented' && reTenants[p.id]);
 const getTotalMonthlyRent = () => getRentedWithTenants().reduce((s,p) => s + (p.rentSet || p.estimatedRent), 0);
 const calcAccumulatedRent = () => {
-  const monthly = getTotalMonthlyRent();
-  if (monthly === 0) return 0;
-  const hourlyRate = monthly / 720;
-  const msElapsed = Math.min(Date.now() - (lastRentCollect || 0), 86400000);
-  return Math.floor(msElapsed / 3600000 * hourlyRate * 100) / 100;
+  const now = Date.now();
+  // Per property: rent/720 per hour since the later of the last collection and the tenant's move-in, capped at 24 h
+  const total = getRentedWithTenants().reduce((s, p) => {
+    const t = reTenants[p.id], from = Math.max(lastRentCollect || 0, finNum(t && t.rentFrom, 0, now, 0));
+    return s + (p.rentSet || p.estimatedRent) / 720 * Math.max(0, Math.min(now - from, 86400000)) / 3600000;
+  }, 0);
+  return Math.floor(total * 100) / 100;
 };
 const getRentAccumPct = () => {
   const msSince = Date.now() - (lastRentCollect || 0);
@@ -7975,7 +8070,7 @@ useEffect(() => {
     setMyProps(ev.props.filter(p => !p.foreclosed));
     if (ev.foreclosed.length) setReTenants(prev => { const n = { ...prev }; ev.foreclosed.forEach(id => delete n[id]); return n; });
   }
-  if (savTake) s2.sav = { ...s2.sav, balance: Math.max(0, parseFloat((s2.sav.balance - savTake).toFixed(2))) };
+  if (savTake) { const b2 = Math.max(0, parseFloat((s2.sav.balance - savTake).toFixed(2))); s2.sav = { ...s2.sav, balance: b2, minBal: Math.min(Number.isFinite(s2.sav.minBal) ? s2.sav.minBal : b2, b2) }; }
   setBank(prev => ({ ...prev, savings: s2.sav, credit: { ...prev.credit, history: [...prev.credit.history, ...(ev ? ev.history : []), ...r.history].slice(-160) }, notices: notes.length ? [{ t: now, notes }, ...(prev.notices || [])].slice(0, 6) : prev.notices }));
 }, [rentNow]);
 // What a lender sees when you apply (the 5 C's): credit, verified income, monthly debts, savings, collateral
@@ -8075,7 +8170,13 @@ const moveMoney = (toSavings, amt) => {
   if (!(amt > 0)) return false;
   if (toSavings ? amt > portfolio.cash : amt > bank.savings.balance - savingsHeld + 0.001) { if (!toSavings && savingsHeld > 0) alert(fmtMoney(savingsHeld) + ' of your savings is held as collateral for your secured loan. You can withdraw up to ' + fmtMoney(Math.max(0, bank.savings.balance - savingsHeld)) + '.'); return false; }
   setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash + (toSavings ? -amt : amt)).toFixed(2)) }));
-  setBank(prev => ({ ...prev, savings: { ...prev.savings, balance: parseFloat((prev.savings.balance + (toSavings ? amt : -amt)).toFixed(2)), lastAccrue: prev.savings.balance > 0 ? prev.savings.lastAccrue : Date.now() } }));
+  setBank(prev => {
+    const old = prev.savings, balance = parseFloat((old.balance + (toSavings ? amt : -amt)).toFixed(2));
+    const low = typeof old.minBal === 'number' && Number.isFinite(old.minBal) ? Math.min(old.minBal, old.balance) : old.balance;
+    // an empty account starts a new interest period now; otherwise interest is paid on the period's lowest balance
+    const savings = old.balance > 0 ? { ...old, balance, minBal: Math.max(0, Math.min(low, balance)) } : { ...old, balance, lastAccrue: Date.now(), minBal: balance };
+    return { ...prev, savings };
+  });
   trackEvent(toSavings ? 'deposit_savings' : 'withdraw_savings', { amt });
   setBankAmt('');
   return true;
@@ -8089,7 +8190,9 @@ const makePaymentFn = (loanId) => {
   const newBalance = Math.max(0, parseFloat((loan.balance - payment).toFixed(2)));
   const fullPayment = payment >= Math.min(loan.monthlyPayment, loan.balance) - 0.01;   // counts as this month's on-time payment
   setLoans(prev => prev.map(l => l.id === loanId ? {...l, balance:newBalance, paymentsLeft:Math.max(0,l.paymentsLeft-1), paidThisMonth: l.paidThisMonth || fullPayment} : l).filter(l => l.balance > 0.01));
-  setPortfolio(prev => ({...prev, cash:parseFloat((prev.cash-payment).toFixed(2))}));
+  const released = newBalance <= 0.01 ? (Number(loan.held) || 0) : 0;   // last payment: the credit-builder money is released (as in payOffLoanFn)
+  setPortfolio(prev => ({...prev, cash:parseFloat((prev.cash-payment+released).toFixed(2))}));
+  if (released > 0) logMoney('loan', 'Credit-builder money released', released);
   return true;
 };
 const payOffLoanFn = (loanId) => {
@@ -8433,6 +8536,15 @@ const MeetingPanel = () => {
 const [phoneTexts, setPhoneTexts] = useState(() => lsJSON(k('phoneTexts'), '[]'));
 const [phoneReadAt, setPhoneReadAt] = useState(() => Number(localStorage.getItem(k('phoneRead')) || 0));
 useEffect(() => { try { localStorage.setItem(k('phoneTexts'), JSON.stringify(phoneTexts.slice(0, 40))); } catch {} }, [phoneTexts]);
+// Economy cloud save. Declared after every effect that writes an "extras" key, and it also runs on every portfolio
+// change, so the cash side and the other side of any trade (bank, loans, bonds, MCX shares, rent clock, wholesale list,
+// license, achievements) are queued in the same render and leave in the same request: they can't be half-saved.
+useEffect(() => {
+  if (econSkip.current) { econSkip.current = false; return; }   // first run = this device's copy, not a change
+  const savedAt = Date.now(); lsSet(k('econSavedAt'), String(savedAt));
+  if (user.practice) return;
+  dbSaveEconomy(user.email, { bank, loans, myBonds, econ, market, savedAt });
+}, [bank, loans, myBonds, econ, market, portfolio, lastRentCollect, wholesaled, achievements, hasReLicense, phoneTexts]);
 // net worth over time for the phone's charts (one sample every 30 real minutes, last 60)
 const [nwHist, setNwHist] = useState(() => lsJSON(k('nwHist'), '[]'));
 useEffect(() => { const last = nwHist[nwHist.length - 1]; if (last && rentNow - last.t < 1800000) return; const v = Math.round(calcNetWorth().net); setNwHist(prev => { const n = [...prev, { t: rentNow, v }].slice(-60); try { localStorage.setItem(k('nwHist'), JSON.stringify(n)); } catch {} return n; }); }, [rentNow]);
@@ -8612,8 +8724,8 @@ const mcxTrade = (t, qty, buy) => {
   const floatShares = Math.floor(total * MQ.Corp.floatPct(t));
   if (buy && pos.shares + qty > floatShares) return alert('Only ' + floatShares.toLocaleString() + ' ' + t + ' shares are for sale on the market (the public float). Founders, insiders and big funds are holding the rest.');
   if (!buy && qty > pos.shares) return alert('You only own ' + pos.shares.toLocaleString() + ' shares.');
-  const q = MQ.Market.quote(c, Date.now()), imp = MQ.Market.impact(c, qty);
-  const px = buy ? q.ask * (1 + imp / 2) : q.bid * (1 - imp / 2), amt = buy ? centsUp(px * qty) : centsDown(px * qty);
+  const tr = MQ.Market.trade(c, qty, buy, Date.now()), imp = tr.imp;
+  const px = tr.px, amt = buy ? centsUp(tr.gross) : centsDown(tr.gross);
   if (buy && amt > portfolio.cash) return alert('That costs ' + fmtMoney(amt) + ' and you have ' + fmtMoney(portfolio.cash) + ' in checking.');
   const before = pos.shares / total * 100, after = (pos.shares + (buy ? qty : -qty)) / total * 100;
   if (!window.confirm((buy ? 'Buy ' : 'Sell ') + qty.toLocaleString() + ' ' + t + ' at about $' + px.toFixed(2) + ' (' + fmtMoney(amt) + ')?' + (imp > 0.005 ? '\n\nYour order is big, so it moves the price about ' + (imp * 50).toFixed(1) + '% against you (price impact).' : ''))) return;
@@ -8622,7 +8734,7 @@ const mcxTrade = (t, qty, buy) => {
     const P = { ...(prev.pos || {}) }, cur = P[t] || { shares: 0, cost: 0 };
     P[t] = buy ? { shares: cur.shares + qty, cost: cur.cost + amt } : { shares: cur.shares - qty, cost: cur.shares ? cur.cost * (cur.shares - qty) / cur.shares : 0 };
     if (!P[t].shares) delete P[t];
-    return { ...prev, pos: P, companies: prev.companies.map(x => x.t === t ? { ...x, price: Math.max(0.5, Math.round(x.price * (1 + (buy ? 1 : -1) * imp * 0.5) * 100) / 100) } : x) };
+    return { ...prev, pos: P, companies: prev.companies.map(x => { if (x.t !== t) return x; const t2 = MQ.Market.trade(x, qty, buy, Date.now()); return { ...x, flow: t2.flow, p0: t2.p0, price: t2.price }; }) };
   });
   logMoney('trade', (buy ? 'Bought ' : 'Sold ') + qty.toLocaleString() + ' ' + t, buy ? -amt : amt);
   setMcxQty('');
@@ -8660,7 +8772,7 @@ const MCXPanel = () => {
       card([e('h3', { style:{ marginTop:0 } }, '📰 Market news'), ...(market.news || []).slice(0, 8).map((n, i) => e('div', { key:i, style:{ padding:'8px 0', borderBottom:'1px solid var(--border)' } }, e('b', { style:{ fontSize:14 } }, n.h), e('div', { style:{ fontSize:13, color:'var(--text-secondary)' } }, n.b)))]));
   }
   const c = market.companies.find(x => x.t === mcxView), q = Q(c), m = MQ.Market.metrics(c), p = (market.pos || {})[c.t] || { shares: 0, cost: 0 };
-  const total = c.shares * 1e6, ownPct = p.shares / total * 100, qty = Math.floor(Number(mcxQty) || 0), imp = MQ.Market.impact(c, qty);
+  const total = c.shares * 1e6, ownPct = p.shares / total * 100, qty = Math.floor(Number(mcxQty) || 0), imp = qty > 0 ? MQ.Market.trade(c, qty, true, Date.now()).imp : 0;
   const row = (l, v, help) => e('div', { key:l, style:{ display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', borderBottom:'1px solid var(--border)', fontSize:14 } }, e('span', { style:{ color:'var(--text-secondary)' }, title: help || '' }, l), e('b', {}, v));
   const fv = MQ.Market.fairValue(c, M), score = (v) => v >= 75 ? '😀 ' + Math.round(v) : v >= 55 ? '🙂 ' + Math.round(v) : '😟 ' + Math.round(v);
   const val = p.shares * q.bid, gain = val - p.cost;
@@ -10919,13 +11031,21 @@ const [authNotice, setAuthNotice] = useState('');
 const [showTutorial, setShowTutorial] = useState(false);
 const [isAdmin, setIsAdmin] = useState(false);
 const userRef = React.useRef(null);
-useEffect(() => { userRef.current = user; if (user && !user.practice && !_previewMode) Cloud.begin(user.email); }, [user]);
+useEffect(() => { userRef.current = user; if (user && !user.practice && !_previewMode) { Cloud.begin(user.email); TabGuard.claim(user.email); } }, [user]);
+// Another tab took over this device or changed the account: this tab stops saving and shows a reload screen
+// (it never wipes the device: the other tab's data lives there now).
+const [frozen, setFrozen] = useState('');
+useEffect(() => { TabGuard.onFreeze((why) => {
+  // Nothing more is sent from here. Every change this tab made is already in localStorage (written first) and marked
+  // unsynced, and the tab that took over loads that copy and re-sends whatever the cloud is missing.
+  Cloud.end(); setShowTutorial(false); setFrozen(why);
+}); }, []);
 // Signed out by the server (expired token, password changed elsewhere): nothing can be saved any more
 // Clearing runs now and again after the app has unmounted (its unmount handlers write a last local save).
 const [wipeSeq, setWipeSeq] = useState(0);
 useEffect(() => { if (wipeSeq) clearLocalUserData(); }, [wipeSeq]);
 const wipeAndShowAuth = (notice) => {
-  Cloud.end(); clearLocalUserData();
+  Cloud.end(); TabGuard.release(); clearLocalUserData();
   setUser(null); setShowTutorial(false); setAuthNotice(notice || ''); setWipeSeq(n => n + 1);
 };
 const endSession = (notice) => wipeAndShowAuth(notice);
@@ -10943,15 +11063,17 @@ useEffect(() => {
       const cached = getSession();
       if (!cached || cached.email !== u.email) clearLocalUserData();   // the device cache belonged to someone else
       setToken(r.data.token && TOKEN_RE.test(r.data.token) ? r.data.token : token);   // keep (or refresh) the session
-      purgeLegacyData(); clearOtherUsersData(u.email); setSession(u); setUser(u); setBooting(false);
+      purgeLegacyData(); clearOtherUsersData(u.email); setSession(u); Cloud.begin(u.email); TabGuard.claim(u.email); setUser(u); setBooting(false);
       return;
     }
     if (r.status === 401 || r.status === 200 || r.status === 400 || r.status === 403) { clearLocalUserData(); purgeLegacyData(); setBooting(false); return; }
-    // Server unreachable (offline, 429, 5xx): open this device's copy only if it belongs to the token's account and the
-    // token has not expired; saves wait in the queue, and the token is re-checked when the connection returns.
+    // The device is offline: open this device's copy only if it belongs to the token's account and the token has not
+    // expired; saves wait in the queue, and the token is re-checked when the connection returns. A server that is
+    // merely unreachable while the browser is online (429, 5xx, blocked request) never opens the app unverified.
     const c = tokenClaims(token), cached = getSession();
     purgeLegacyData();
-    if (c && typeof c.exp === 'number' && c.exp * 1000 > Date.now() && cached && c.sub === cached.email) {
+    const reallyOffline = r.status === 0 && typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (reallyOffline && c && typeof c.exp === 'number' && c.exp * 1000 > Date.now() && cached && c.sub === cached.email) {
       setUser({ name: cached.name, email: cached.email, free_access: cached.free_access === true, offline: true });
       const recheck = async () => {
         window.removeEventListener('online', recheck); clearTimeout(retry);
@@ -10971,21 +11093,46 @@ useEffect(() => {
 }, []);
 const signOut = async () => {
   const u = userRef.current;
-  if (u && !u.practice && !_previewMode) { try { await Promise.race([Cloud.flush(), new Promise(r => setTimeout(r, 4000))]); } catch {} }   // last changes first
+  // last changes first: every component's pending save is queued (Cloud.flushAll), then sent, then the device is wiped
+  if (u && !u.practice && !_previewMode) { try { await Promise.race([Cloud.flushAll(), new Promise(r => setTimeout(r, 4000))]); } catch {} }
+  TabGuard.release();
   wipeAndShowAuth('');
 };
+const deleteBusy = React.useRef(false);
 const deleteMyData = async () => {
-  if (!window.confirm('Delete my data from this device?\n\nThis removes your progress, notes, game saves and sign-in from this browser and signs you out.\n\nYour account and the copy saved in the cloud are not deleted by this button. To delete those, a parent, guardian or you can contact us (see "How parents can review or delete data" in the Privacy Policy).')) return;
-  wipeAndShowAuth('Your data was removed from this device.');
+  if (deleteBusy.current) return;
+  if (!window.confirm('Delete my account and all my data?\n\nThis permanently deletes your Money Quest account and everything saved with it (progress, notes, game saves) from our servers, removes it from this browser and signs you out. It cannot be undone.\n\nYour access code will not work again.')) return;
+  const u = userRef.current;
+  if (!u || u.practice) return;
+  deleteBusy.current = true;
+  Cloud.hold(true);   // no save may reach the server while (or after) the account is deleted
+  const r = await apiCall('auth-delete', { method: 'POST', body: { confirm: true }, expectUser: u.email, timeoutMs: 20000 });
+  deleteBusy.current = false;
+  if (r.status === 200 && r.data && r.data.ok === true) {
+    TabGuard.release();
+    wipeAndShowAuth('Your account and data were deleted.');
+    return;
+  }
+  Cloud.hold(false);
+  if (r.status === 401) { endSession('Your session has ended. Please sign in again, then try deleting your data again.'); return; }
+  alert('Your data was NOT deleted. ' + apiErrorText(r, "We couldn't delete your account right now.") + '\n\nPlease try again later, or ask a parent or guardian to contact us (see "How parents can review or delete data" in the Privacy Policy).');
 };
 const handleAuth = (u) => {
 // New players get the tutorial only; "What's New" is for people who used an older version
 if (u.isNew) { try { localStorage.setItem('investedPatchSeen', PATCH_VERSION); } catch {} setTimeout(() => setShowTutorial(true), 450); }
 setAuthNotice('');
-if (!u.practice) Cloud.begin(u.email);
+if (!u.practice) { Cloud.begin(u.email); TabGuard.claim(u.email); }
 setUser(u);
 };
 if (isAdmin) return e(AdminDashboard, { onSignOut: () => setIsAdmin(false) });
+if (frozen) return e('div', { className: 'auth-wrap', role: 'alert' },
+  e('div', { className: 'auth-card', style: { textAlign: 'center' } },
+    e('div', { style: { fontSize: 44, marginBottom: 10 } }, '🐷'),
+    e('h2', { style: { margin: '0 0 8px' } }, frozen === 'tab' ? 'Money Quest is open in another tab' : 'You signed in or out in another tab'),
+    e('p', { style: { color: 'var(--text-secondary)', lineHeight: 1.6 } }, frozen === 'tab'
+      ? 'Only one tab can play at a time, so your money and progress stay correct. This tab has stopped saving.'
+      : 'This tab has stopped so it can never save into the wrong account.'),
+    e('button', { type: 'button', className: 'btn btn-primary', style: { marginTop: 12 }, onClick: () => window.location.reload() }, frozen === 'tab' ? 'Play in this tab instead' : 'Reload')));
 if (booting) return e('div', { className: 'auth-wrap', role: 'status', 'aria-live': 'polite' }, e('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: 15 } }, e('div', { style: { fontSize: 44, marginBottom: 10 } }, '🐷'), 'Signing you in…'));
 return e('div', {},
 user ? e(FinanceEd, { key: user.email, user, onSignOut: signOut, onDeleteData: user.practice ? null : deleteMyData }) : e(AuthScreen, { key: authNotice, notice: authNotice, onAuth: handleAuth, onAdminAuth: () => setIsAdmin(true) }),

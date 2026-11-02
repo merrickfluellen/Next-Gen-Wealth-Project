@@ -198,7 +198,7 @@ async function dbHit(fullKey, windowSec, max) {
   const n = typeof r.data === 'number' ? r.data : Number(r.data);
   if (r.status >= 200 && r.status < 300 && Number.isFinite(n) && n >= 0) return n;
   dbDownUntil = Date.now() + DB_COOLDOWN_MS;
-  console.error(`ratelimit: rl_hit failed (status ${r.status}${r.error && r.error.code ? ', ' + r.error.code : ''}); using ${'memory/fail-closed'} for ${DB_COOLDOWN_MS / 1000}s`);
+  console.error(`ratelimit: rl_hit failed (status ${r.status}${r.error && r.error.code ? ', ' + r.error.code : ''}); using memory (or failing closed) for ${DB_COOLDOWN_MS / 1000}s`);
   return null;
 }
 
