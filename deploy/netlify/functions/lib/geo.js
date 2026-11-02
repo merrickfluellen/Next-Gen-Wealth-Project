@@ -90,7 +90,7 @@ async function nominatimThrottle() {
 function cleanText(s, max = 120) {
   if (s == null) return '';
   if (typeof s !== 'string' && typeof s !== 'number') return '';
-  return String(s).replace(/[\u0000-\u001f\u007f-\u009f<>`  ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  return String(s).replace(/[\u0000-\u001f\u007f-\u009f<>`\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
 function header(event, name) {
@@ -171,7 +171,7 @@ function tractFrom(geographies) {
 /**
  * @returns {Promise<{address,city,state,zip,lat,lng,matchedAddress,geo:{state,county,tract}|null}|null>}
  */
-async function censusGeocode(oneLineAddress) {
+async function censusGeocode(oneLineAddress, timeoutMs = DEFAULT_TIMEOUT) {
   const q = cleanText(oneLineAddress, 200);
   if (q.length < 5) return null;
   const key = normKey(q);
@@ -179,7 +179,7 @@ async function censusGeocode(oneLineAddress) {
   if (cached !== undefined) return cached;
 
   const url = `${CENSUS_BASE}/onelineaddress?address=${encodeURIComponent(q)}&${CENSUS_PARAMS}`;
-  const j = await fetchJson(url);
+  const j = await fetchJson(url, { timeoutMs });
   if (!j) return null; // network failure — don't cache
   const m = j.result && Array.isArray(j.result.addressMatches) && j.result.addressMatches[0];
   if (!m || !m.coordinates) { _addrCache.set(key, null); return null; }
@@ -214,7 +214,7 @@ async function censusGeocode(oneLineAddress) {
 
 // ── Census: lat/lng → tract FIPS ─────────────────────────────────────────────
 /** @returns {Promise<{state,county,tract}|null>} */
-async function censusTractForPoint(lat, lng) {
+async function censusTractForPoint(lat, lng, timeoutMs = DEFAULT_TIMEOUT) {
   lat = Number(lat); lng = Number(lng);
   if (!validLatLng(lat, lng)) return null;
   const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
@@ -222,7 +222,7 @@ async function censusTractForPoint(lat, lng) {
   if (cached !== undefined) return cached;
 
   const url = `${CENSUS_BASE}/coordinates?x=${lng.toFixed(6)}&y=${lat.toFixed(6)}&${CENSUS_PARAMS}`;
-  const j = await fetchJson(url);
+  const j = await fetchJson(url, { timeoutMs });
   if (!j) return null;
   const geo = tractFrom(j.result && j.result.geographies);
   _tractCache.set(key, geo);
@@ -258,7 +258,7 @@ function placeLabel(r) {
 /**
  * @returns {Promise<Array<{label,kind:'place',lat,lng,zoom,type,city?,state?,zip?,bbox?}>>}
  */
-async function nominatimSearch(q) {
+async function nominatimSearch(q, timeoutMs = DEFAULT_TIMEOUT) {
   q = cleanText(q, 200);
   if (q.length < 2) return [];
   const key = normKey(q);
@@ -273,7 +273,7 @@ async function nominatimSearch(q) {
   const url = `${NOMINATIM_BASE}?${params}&format=jsonv2&limit=5&addressdetails=1`;
 
   if (!(await nominatimThrottle())) return []; // too busy — don't cache
-  const j = await fetchJson(url, { headers: { 'Accept-Language': 'en-US' } });
+  const j = await fetchJson(url, { timeoutMs, headers: { 'Accept-Language': 'en-US' } });
   if (!Array.isArray(j)) return []; // failure — don't cache
 
   const seen = new Set();

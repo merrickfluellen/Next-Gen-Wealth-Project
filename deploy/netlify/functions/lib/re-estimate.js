@@ -131,7 +131,8 @@ function estimateHome(h, opts = {}) {
   const repairCost = condition === 'Average' ? r1000((arv - price) * 0.6) : 0;
   const spread = numIn(opts.spread, 0.01, 0.9) || 0.2;
   const lat = Number(h.lat), lng = Number(h.lng);
-  const dom = h.forSale ? Math.round(numIn(h.daysOnMarket, 0, 3650)) : 0;
+  const domN = h.daysOnMarket == null || h.daysOnMarket === '' ? NaN : Number(h.daysOnMarket);
+  const hasDom = !!h.forSale && isFinite(domN) && domN >= 0 && domN <= 3650;
 
   return {
     id: 're_' + hash(key).toString(36),
@@ -143,7 +144,7 @@ function estimateHome(h, opts = {}) {
     insurance: Math.round(value * 0.005 / 12),
     hoa: type === 'Condo' || type === 'Townhouse' ? Math.round(150 + rng() * 200) : 0,
     lotSize: type === 'Single Family' ? Math.round((4000 + rng() * 8000) / 100) * 100 : 0,
-    daysOnMarket: h.forSale && (dom || Number(h.daysOnMarket) === 0) ? dom : Math.floor(rng() * 90) + 1,
+    daysOnMarket: hasDom ? Math.round(domN) : Math.floor(rng() * 90) + 1,
     schoolRating: null, crimeRating: null,
     appreciationRate: a.appr,
     photoSeed: hash(key) % 999 + 1,
@@ -166,7 +167,7 @@ function rcBudgetOk() {
   _rcBudget.n++;
   return true;
 }
-async function rc(path, params) {
+async function rc(path, params, timeoutMs = 7000) {
   if (!rcKey()) return null;
   const qs = Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
   const ck = path + '?' + qs;
@@ -174,7 +175,7 @@ async function rc(path, params) {
   if (hit !== undefined) return hit;
   if (!rcBudgetOk()) return null;
   // redirect:'error' → the X-Api-Key header can never follow a redirect to another host
-  const j = await fetchJson(RC_BASE + ck, { timeoutMs: 7000, redirect: 'error', headers: { 'X-Api-Key': rcKey() } });
+  const j = await fetchJson(RC_BASE + ck, { timeoutMs, redirect: 'error', headers: { 'X-Api-Key': rcKey() } });
   if (j !== null) _rcCache.set(ck, j);   // don't cache network / HTTP failures
   return j;
 }
@@ -203,26 +204,26 @@ function fromRentcastListing(x, geo) {
   });
 }
 
-async function rentcastListings(lat, lng, radiusMiles, geo) {
+async function rentcastListings(lat, lng, radiusMiles, geo, timeoutMs = 7000) {
   lat = Number(lat); lng = Number(lng);
   const radius = clamp(Number(radiusMiles) || 0.5, 0.1, 3);
   if (!validLatLng(lat, lng)) return null;
   // Round the point so nearby map views share one paid call (and one cache entry)
-  const j = await rc('/listings/sale', { latitude: lat.toFixed(3), longitude: lng.toFixed(3), radius: radius.toFixed(1), status: 'Active', limit: 40 });
+  const j = await rc('/listings/sale', { latitude: lat.toFixed(3), longitude: lng.toFixed(3), radius: radius.toFixed(1), status: 'Active', limit: 40 }, timeoutMs);
   if (!Array.isArray(j) || !j.length) return null;
   return j.slice(0, 200).map(x => fromRentcastListing(x, geo)).filter(Boolean).slice(0, 40);
 }
 
 /** RentCast AVM for one address → { property, valueLow, valueHigh, rentLow, rentHigh, comps } or null */
-async function rentcastValue(address, fallback) {
+async function rentcastValue(address, fallback, timeoutMs = 7000) {
   if (!rcKey()) return null;
   address = cleanText(address, 200);
   if (address.length < 5) return null;
   fallback = fallback || {};
-  const v = await rc('/avm/value', { address, compCount: 5 });
+  // In parallel to stay inside the function time limit (both answers are cached for a day).
+  const [v, r] = await Promise.all([rc('/avm/value', { address, compCount: 5 }, timeoutMs), rc('/avm/rent/long-term', { address, compCount: 5 }, timeoutMs)]);
   const vPrice = v && typeof v === 'object' ? numIn(v.price, 1000, 1e9) : 0;
-  if (!vPrice) return null;                     // no value → skip the (paid) rent call too
-  const r = await rc('/avm/rent/long-term', { address, compCount: 5 });
+  if (!vPrice) return null;
   const sp = v.subjectProperty && typeof v.subjectProperty === 'object' ? v.subjectProperty : {};
   const pick = (a, b) => (a != null && a !== '' ? a : b);
   const p = estimateHome(Object.assign({}, fallback, { beds: pick(sp.bedrooms, fallback.beds), baths: pick(sp.bathrooms, fallback.baths),

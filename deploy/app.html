@@ -5378,6 +5378,27 @@ const kqLevel = (xp) => Math.floor(Math.sqrt(xp / 30)) + 1;
 const kqLevelStart = (lv) => 30 * (lv - 1) * (lv - 1);
 const kqLevelName = (lv) => KQ_LEVELS[Math.min(lv - 1, KQ_LEVELS.length - 1)];
 const kqDefault = () => ({ xp:0, coins:0, jar:0, stars:{}, streak:0, lastDay:null, shields:1, goalDay:null, goalXp:0, stickers:[], plays:0, track:null, jarDay:null });
+// Saves come from localStorage / the cloud and can be stale, hand-edited or corrupted: coerce every field to a sane
+// type and range (no NaN/Infinity/negatives/strings) so a bad save can't crash the map or mint coins.
+const kqInt = (v, max) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0; };
+const kqDay = (v) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
+const kqSanitize = (raw) => {
+  const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}, d = kqDefault();
+  const stars = {};
+  if (s.stars && typeof s.stars === 'object' && !Array.isArray(s.stars)) Object.keys(s.stars).forEach(id => { const v = kqInt(s.stars[id], 3); if (v) stars[id] = v; });
+  const valid = new Set(KQ_STICKERS.map(x => x.e));
+  const stickers = Array.isArray(s.stickers) ? [...new Set(s.stickers.filter(x => valid.has(x)))] : [];
+  return { ...d, xp: kqInt(s.xp, 1e7), coins: kqInt(s.coins, 1e7), jar: kqInt(s.jar, 1e7), stars, streak: kqInt(s.streak, 1e5),
+    lastDay: kqDay(s.lastDay), shields: s.shields === undefined ? d.shields : kqInt(s.shields, 2), goalDay: kqDay(s.goalDay), goalXp: kqInt(s.goalXp, 1e6),
+    stickers, plays: kqInt(s.plays, 1e7), track: s.track === 'pro' || s.track === 'junior' ? s.track : null, jarDay: kqDay(s.jarDay) };
+};
+// Cloud vs local: keep the further-along save, but never drop a lesson's stars or a sticker the other copy has
+// (dropping them lost progress AND let finished lessons pay their one-time sim-cash reward again).
+const kqMerge = (a, b) => {
+  const A = kqSanitize(a), B = kqSanitize(b), base = kqSaveScore(B) > kqSaveScore(A) ? B : A, stars = { ...A.stars };
+  Object.keys(B.stars).forEach(id => { stars[id] = Math.max(stars[id] || 0, B.stars[id]); });
+  return { ...base, stars, stickers: [...new Set([...A.stickers, ...B.stickers])] };
+};
 // Turn a long Pro lesson (plain text with ALL-CAPS headings) into bite-size learn cards
 const KQ_ACRONYMS = { etf:'ETF', etfs:'ETFs', defi:'DeFi', tron:'TRON', trx:'TRX' };   // keep these capitalized in card titles
 const kqCardsFromContent = (content) => {
