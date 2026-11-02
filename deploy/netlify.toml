@@ -1,4 +1,6 @@
 [build]
+  # Publish this folder (base dir = deploy/). Explicit so the published root never depends on UI settings.
+  publish = "."
   functions = "netlify/functions"
 
 # SITE_URL and RESEND_FROM are intentionally public (site URL + from-email address)
@@ -13,8 +15,15 @@
   force = true
 
 # ── Old landing page → current homepage (its feature list is out of date) ──────
+# Both forms: Netlify also serves landing.html at the pretty URL /landing.
 [[redirects]]
   from = "/landing.html"
+  to = "/"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/landing"
   to = "/"
   status = 301
   force = true
@@ -61,27 +70,33 @@
     Pragma = "no-cache"
     Expires = "0"
 
-[[headers]]
-  for = "/landing.html"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
-    Pragma = "no-cache"
-    Expires = "0"
+# Function responses set their own Cache-Control in code (auth/user endpoints: no-store;
+# price/map endpoints: short public CDN caching). Do not add a /.netlify/functions/* header
+# block here: it would conflict with those values.
 
-# ── Netlify functions: never cache ────────────────────────────────────────────
+# ── Self-hosted libraries + built stylesheet ──────────────────────────────────
+# /vendor/<pkg>@<version>/ paths are versioned: a new version gets a new path, so they never change.
 [[headers]]
-  for = "/.netlify/functions/*"
+  for = "/vendor/*"
   [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# /tailwind.css keeps its name across rebuilds: cache briefly, then revalidate.
+[[headers]]
+  for = "/tailwind.css"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, must-revalidate"
 
 # ── Security + CSP headers for everything ────────────────────────────────────
-# CSP origins (audited against app.html / index.html / landing.html):
-#   scripts : unpkg.com (React 18, Leaflet), cdn.jsdelivr.net (supabase-js), cdn.tailwindcss.com
-#   styles  : fonts.googleapis.com, unpkg.com (leaflet.css); Tailwind CDN injects <style> at runtime
+# CSP origins (audited against app.html / index.html / landing.html / privacy.html / terms.html):
+#   scripts : same origin only. React, ReactDOM, Leaflet and three.js are self-hosted under /vendor/
+#             (copied from verified npm tarballs, see vendor/README.md); Tailwind is the prebuilt /tailwind.css.
+#   styles  : same origin + fonts.googleapis.com
 #   fonts   : fonts.gstatic.com
-#   images  : OSM / MapTiler / Stadia map tiles (see map-config.js), unpkg.com (Leaflet marker icons)
-#   connect : Supabase (REST + realtime wss), Overpass API mirrors; prices/crypto/geocoding go via functions
+#   images  : OSM / MapTiler / Stadia map tiles (see map-config.js)
+#   connect : same-origin Netlify functions, Overpass API mirrors. Supabase is only called server-side.
 #   manifest: built at runtime as a blob: URL
+#   frames/workers: none used
 # 'unsafe-inline' stays in script-src/style-src: the pages rely on large inline <script> blocks and
 # inline style attributes. Moving them to files (or nonces/hashes) would allow dropping it.
 [[headers]]
@@ -94,4 +109,4 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), hid=(), magnetometer=(), gyroscope=(), accelerometer=()"
     Cross-Origin-Opener-Policy = "same-origin"
     X-Permitted-Cross-Domain-Policies = "none"
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://unpkg.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://api.maptiler.com https://tiles.stadiamaps.com https://vtxuvmtnqlxidnswnunx.supabase.co; connect-src 'self' https://vtxuvmtnqlxidnswnunx.supabase.co wss://vtxuvmtnqlxidnswnunx.supabase.co https://overpass-api.de https://overpass.private.coffee; frame-src https://docs.google.com; manifest-src 'self' blob: data:; worker-src 'self' blob:; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://tile.openstreetmap.org https://api.maptiler.com https://tiles.stadiamaps.com; connect-src 'self' https://overpass-api.de https://overpass.private.coffee; frame-src 'none'; worker-src 'none'; manifest-src 'self' blob: data:; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests"

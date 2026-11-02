@@ -11,29 +11,35 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to full commit SHAs (resolved with `git ls-remote`); the comment is the tag.
+# Dependabot (.github/dependabot.yml) bumps the SHA and the comment together.
+
 jobs:
   checks:
     name: Syntax and config checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - name: node --check every Netlify function
+      - name: node --check Netlify functions and scripts/
         run: |
           set -euo pipefail
           status=0
           while IFS= read -r -d '' f; do
             node --check "$f" || { echo "::error file=$f::syntax error"; status=1; }
-          done < <(find deploy/netlify/functions -name '*.js' -print0)
+          done < <(find deploy/netlify/functions scripts -name '*.js' -print0)
           exit $status
 
-      - name: Validate deploy/netlify.toml
-        run: python3 -c 'import tomllib; tomllib.load(open("deploy/netlify.toml","rb")); print("netlify.toml OK")'
+      - name: Validate deploy/netlify.toml and .gitleaks.toml
+        run: |
+          python3 -c 'import tomllib; [tomllib.load(open(p,"rb")) for p in ("deploy/netlify.toml",".gitleaks.toml")]; print("TOML OK")'
 
       - name: Validate JSON files
         run: |
@@ -44,16 +50,59 @@ jobs:
           done < <(find . -name '*.json' -not -path './.git/*' -not -path '*/node_modules/*' -print0)
           exit $status
 
+      - name: Vendored files match the hashes in deploy/vendor/README.md
+        run: |
+          set -euo pipefail
+          cd deploy/vendor
+          status=0; listed=""
+          # Table rows look like: | `path` | `source` | bytes | `sha384-...` |
+          while IFS= read -r line; do
+            f=$(printf '%s\n' "$line" | sed -E 's/^\| `([^`]+)`.*/\1/')
+            want=$(printf '%s\n' "$line" | grep -oE 'sha384-[A-Za-z0-9+/=]+')
+            listed="$listed$f"$'\n'
+            if [ ! -f "$f" ]; then echo "::error file=deploy/vendor/$f::listed in README.md but missing"; status=1; continue; fi
+            got="sha384-$(openssl dgst -sha384 -binary "$f" | openssl base64 -A)"
+            if [ "$got" != "$want" ]; then echo "::error file=deploy/vendor/$f::sha384 mismatch (got $got)"; status=1; else echo "ok  $f"; fi
+          done < <(grep -E '^\| `[^`]+` \|.*sha384-' README.md)
+          [ -n "$listed" ] || { echo "::error::no hash rows found in deploy/vendor/README.md"; exit 1; }
+          while IFS= read -r f; do
+            printf '%s' "$listed" | grep -qxF "$f" || { echo "::error file=deploy/vendor/$f::file not listed in README.md"; status=1; }
+          done < <(find . -type f ! -name README.md | sed 's|^\./||' | sort)
+          exit $status
+
+      - name: No third-party scripts in deploy/*.html
+        run: |
+          set -euo pipefail
+          # External <script src="http(s)://..."> (or protocol-relative //host) and scripts injected from JS
+          # with an absolute URL. All JS must be same-origin (deploy/vendor/); the CSP blocks anything else.
+          bad=$(grep -nEi '<script[^>]*\ssrc\s*=\s*["'\'']?(https?:)?//' deploy/*.html || true)
+          bad2=$(grep -nEi '\.src\s*=\s*["'\''`](https?:)?//' deploy/*.html | grep -viE '\b(img|image|audio|video|iframe)\b' || true)
+          if [ -n "$bad$bad2" ]; then
+            printf '%s\n%s\n' "$bad" "$bad2"
+            echo "::error::external script reference in deploy/*.html; self-host it under deploy/vendor/"
+            exit 1
+          fi
+          echo "no external scripts"
+
+      - name: deploy/tailwind.css is up to date with deploy/*.html
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build:css
+          git diff --exit-code -- deploy/tailwind.css || {
+            echo "::error file=deploy/tailwind.css::stale; run 'npm ci && npm run build:css' and commit the result"; exit 1; }
+
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
