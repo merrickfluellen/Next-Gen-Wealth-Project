@@ -2723,8 +2723,11 @@ window.MQ = window.MQ || {};
   // Price right now: monthly price + a slow intraday wiggle (no trading needed to see it move)
   const quote = (c, now) => {
     const d = def(c.t), k = (now / 3600000) + (c.t.charCodeAt(0) * 3.1);
-    const p = Math.max(0.05, c.price * (1 + d.vol * 0.03 * (Math.sin(k * 0.9) + 0.6 * Math.sin(k * 2.3 + 1))));
     const spread = c.price * c.shares < 300 ? 0.008 : c.price * c.shares < 2000 ? 0.004 : 0.002;   // small companies: wider bid-ask spread
+    // The intraday wiggle is a fixed function of the clock, so it is predictable (and the device clock can be changed).
+    // Keep its peak-to-trough (2 × 1.6 × amp) under the spread, so "buy the dip, sell the bump" can never beat the round-trip cost.
+    const amp = Math.min(d.vol * 0.03, spread * 0.3);
+    const p = Math.max(0.05, c.price * (1 + amp * (Math.sin(k * 0.9) + 0.6 * Math.sin(k * 2.3 + 1))));
     return { price: r2(p), bid: r2(p * (1 - spread / 2)), ask: r2(p * (1 + spread / 2)), spread, prev: c.hist.length > 1 ? c.hist[c.hist.length - 2] : c.price };
   };
   // Big orders move the price ("square-root" market-impact rule). Returns the extra % paid (buy) / lost (sell).
@@ -2882,6 +2885,10 @@ const lsJSON = (key, fallbackJson) => {
 const finNum = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
 const lsList = (key, ok) => { const v = lsJSON(key, '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x) && (!ok || ok(x))) : []; };
 const lsDays = (key) => Math.floor(finNum(localStorage.getItem(key), 0, 36500, 0));   // time-machine days: 0..100 years
+// Trade rounding always favors the house: buys round UP to the cent, sales round DOWN, so splitting an order into
+// many tiny ones can't mint fractions of a cent (or get shares for $0.00). The 1e-6 absorbs float noise like 0.1*3.
+const centsUp = (x) => Math.ceil(x * 100 - 1e-6) / 100;
+const centsDown = (x) => Math.max(0, Math.floor(x * 100 + 1e-6) / 100);
 const MARKET_ASOF = 'June 2025';
 const marketSnapshot = [
   { label: 'S&P 500', value: '≈ 6,200', note: 'Large-cap U.S. stock index' },
@@ -5833,7 +5840,7 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
     if (amt > 0 && st.coins < amt) return;
     if (amt < 0 && st.jar <= 0) return;
     kqSound('tap');
-    setSt(s => amt > 0 ? { ...s, coins: s.coins - amt, jar: s.jar + amt } : { ...s, coins: s.coins + s.jar, jar: 0 });
+    setSt(s => amt > 0 ? (s.coins >= amt ? { ...s, coins: s.coins - amt, jar: s.jar + amt } : s) : { ...s, coins: s.coins + s.jar, jar: 0 });   // re-check against the latest coins
   };
 
   const inLesson = tab === 'quest' && screen === 'lesson';
@@ -7277,7 +7284,7 @@ const [simPlaying, setSimPlaying] = useState(false);
 
 const [portfolio, setPortfolio] = useState(() => { const p = lsJSON(k('portfolio'), '{}'), o = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
   const investments = (Array.isArray(o.investments) ? o.investments : []).filter(i => i && typeof i === 'object' && typeof i.name === 'string' && finNum(i.quantity, 0, 1e12, 0) > 0 && finNum(i.purchasePrice, 0, 1e9, -1) >= 0)
-    .map(i => ({ ...i, quantity: Number(i.quantity), purchasePrice: Number(i.purchasePrice), seed: finNum(i.seed, 0, 1, 0.5) }));
+    .map(i => ({ ...i, quantity: Number(i.quantity), purchasePrice: Number(i.purchasePrice), seed: finNum(i.seed, 0, 1, 0.5), buyDay: Math.floor(finNum(i.buyDay, 0, 36500, 0)) }));
   return { ...o, cash: Math.round(finNum(o.cash, -1e12, 1e12, 0) * 100) / 100, debt: finNum(o.debt, 0, 1e12, 0), investments }; });
 const [investmentTab, setInvestmentTab] = useState('wallet');
 const [buyModal, setBuyModal] = useState(null); // { sym, d } — stock selected for purchase
@@ -7289,7 +7296,10 @@ const [liveCryptoPrices, setLiveCryptoPrices] = useState({});
 const [cryptoLoading, setCryptoLoading] = useState(false);
 const [cryptoBuyModal, setCryptoBuyModal] = useState(null);
 const [cryptoBuyQty, setCryptoBuyQty] = useState('');
-const [mlsProps, setMlsProps] = useState(() => generateMLS());
+// Contracts you already assigned (wholesaled) stay gone: the MLS is rebuilt from the same daily seed on every reload,
+// which used to let the same deal be assigned again and again for a fresh fee.
+const [wholesaled, setWholesaled] = useState(() => { const v = lsJSON(k('wholesaled'), '[]'); return Array.isArray(v) ? v : []; });
+const [mlsProps, setMlsProps] = useState(() => generateMLS().filter(p => !wholesaled.includes(p.id)));
 const [myProps, setMyProps] = useState(() => lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0));
 const [reTenants, setReTenants] = useState(() => { const v = lsJSON(k('reTenants'), '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; });
 const [hasReLicense, setHasReLicense] = useState(() => lsJSON(k('reLicense'), 'false'));
@@ -7313,18 +7323,30 @@ const [myBonds, setMyBonds] = useState(() => lsList(k('myBonds'), b => finNum(b.
 const [loans, setLoans] = useState(() => lsList(k('loans'), l => finNum(l.balance, 0, 1e10, -1) >= 0 && finNum(l.rate, 0, 100, -1) >= 0));
 // FirstCity Bank: savings account + credit file (payment history). Math lives in MQ.Bank.
 const bankDefault = () => ({ savings: { balance: 0, earned: 0, lastAccrue: Date.now() }, credit: { history: [], firstAt: null, inquiries: [] }, notices: [] });
-const [bank, setBank] = useState(() => { const b = lsJSON(k('bank'), 'null'); return b && b.savings && b.credit ? { ...bankDefault(), ...b } : bankDefault(); });
+const [bank, setBank] = useState(() => { const b = lsJSON(k('bank'), 'null'), d = bankDefault();
+  if (!(b && typeof b.savings === 'object' && b.savings && typeof b.credit === 'object' && b.credit)) return d;
+  const sv = b.savings, cr = b.credit;   // bad numbers/lists in a save reset to safe values instead of NaN-ing the bank
+  return { ...d, ...b, savings: { ...sv, balance: Math.round(finNum(sv.balance, 0, 1e12, 0) * 100) / 100, earned: finNum(sv.earned, -1e12, 1e12, 0), lastAccrue: finNum(sv.lastAccrue, 0, 1e15, Date.now()) || Date.now() },
+    credit: { ...cr, history: Array.isArray(cr.history) ? cr.history.filter(h => h && typeof h === 'object') : [], inquiries: Array.isArray(cr.inquiries) ? cr.inquiries.filter(Number.isFinite) : [], firstAt: Number.isFinite(cr.firstAt) ? cr.firstAt : null },
+    notices: Array.isArray(b.notices) ? b.notices : [] }; });
 const [bankTab, setBankTab] = useState('accounts');
 const [bankAmt, setBankAmt] = useState('');
 const [loanApp, setLoanApp] = useState(null);
 // Personal economy (Phase 3): job + paychecks, where you live, bills, monthly statements, money ledger. Math in MQ.Economy/MQ.Payroll.
 const econDefault = () => ({ job: null, exp: 0, housing: 'family', wants: {}, owed: 0, missedStreak: 0, deposit: 0, lastMonth: Date.now(), months: [], ledger: [], city: { taxRate: 1.0, hoaDues: 45, club: { picks: [] }, attended: {} } });
-const [econ, setEcon] = useState(() => { const v = lsJSON(k('econ'), 'null'); return v && typeof v === 'object' && v.housing ? { ...econDefault(), ...v } : econDefault(); });
+const [econ, setEcon] = useState(() => { const v = lsJSON(k('econ'), 'null'), d = econDefault(); if (!(v && typeof v === 'object' && v.housing)) return d;
+  const obj = (x, f) => x && typeof x === 'object' && !Array.isArray(x) ? x : f;
+  return { ...d, ...v, ledger: Array.isArray(v.ledger) ? v.ledger.filter(x => x && Number.isFinite(x.amt)) : [], months: Array.isArray(v.months) ? v.months : [], wants: obj(v.wants, {}), city: obj(v.city, d.city),
+    deposit: finNum(v.deposit, 0, 1e7, 0), owed: finNum(v.owed, 0, 1e9, 0), exp: finNum(v.exp, 0, 1e5, 0), lastMonth: finNum(v.lastMonth, 0, 1e15, Date.now()) || Date.now() }; });
 const [finTab, setFinTab] = useState('overview');
 const [jobApp, setJobApp] = useState(null);   // job offer being accepted: { id, sig }
 const [houseView, setHouseView] = useState(null);
 // Money City Exchange (Phase 4): simulated companies + your positions (market.pos = { TICKER: { shares, cost } })
-const [market, setMarket] = useState(() => { const v = lsJSON(k('market'), 'null'); return v && v.companies && v.companies.length === MQ.Market.COMPANIES.length ? v : { ...MQ.Market.init(Date.now()), pos: {} }; });
+const [market, setMarket] = useState(() => { const v = lsJSON(k('market'), 'null');
+  if (!(v && Array.isArray(v.companies) && v.companies.length === MQ.Market.COMPANIES.length && v.companies.every(c => c && Number.isFinite(c.price) && c.price > 0 && Array.isArray(c.hist)) && v.macro && typeof v.macro === 'object')) return { ...MQ.Market.init(Date.now()), pos: {} };
+  const pos = {};   // positions: whole shares > 0 with a finite cost basis, only for listed tickers
+  Object.entries(v.pos && typeof v.pos === 'object' ? v.pos : {}).forEach(([t, p]) => { if (p && v.companies.some(c => c.t === t) && Number.isInteger(p.shares) && p.shares > 0 && Number.isFinite(p.cost)) pos[t] = { ...p, cost: Math.max(0, p.cost) }; });
+  return { ...v, pos }; });
 const [mcxView, setMcxView] = useState(null);   // ticker being viewed, or null for the market list
 const [mcxQty, setMcxQty] = useState('');
 MQ.Bank.setFed(market.macro.rate);   // bank savings/loan rates and mortgages follow the Money City Fed   // world house being viewed: building id
@@ -7359,7 +7381,7 @@ const reFinishPurchase = (c) => {
   const t = reTx; if (!t) return;
   const prop = t.prop;
   if (c.q.loan > 0) setBank(prev => prev.credit.firstAt ? prev : { ...prev, credit: { ...prev.credit, firstAt: Date.now() } });
-  setMyProps(prev => prev.some(x => x.id === prop.id) ? prev : [...prev, { ...prop, purchasePrice:c.price, purchaseDate:new Date().toLocaleDateString(), equity: c.price - c.q.loan, mortgage: c.q.loan,
+  setMyProps(prev => prev.some(x => x.id === prop.id) ? prev : [...prev, { ...prop, purchasePrice:c.price, purchaseDate:new Date().toLocaleDateString(), boughtAt:Date.now(), equity: c.price - c.q.loan, mortgage: c.q.loan,
     loanRate: c.q.rate, loanType: c.q.lt.name, lender: c.q.lender ? c.q.lender.name : 'Cash', closingCostsPaid: c.costs, ownerOccupied: t.occupancy === 'owner', isHome: prop.isHome || t.occupancy === 'owner',
     status:'vacant', tenant:null, rentSet:prop.estimatedRent, flipBudget:0, flipStarted:null }]);
   trackEvent('buy_property_full', { price:c.price, loan:c.q.loan, path:t.agentPath });
@@ -7457,8 +7479,9 @@ const handleBuyCrypto = () => {
   if (!qty || qty <= 0 || isNaN(qty)) return;
   const coin = cryptoBuyModal;
   const price = getCryptoPrice(coin.sym);
-  const cost = parseFloat((qty * price).toFixed(2));
-  if (cost > portfolio.cash) return;
+  if (!(price > 0) || !Number.isFinite(qty)) return;
+  const cost = centsUp(qty * price);
+  if (!(cost >= 0.01) || cost > portfolio.cash) return;   // no free coins from orders that round to $0.00
   setPortfolio(prev => ({...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, {id:Date.now(), name:coin.sym, type:'Crypto', quantity:qty, purchasePrice:price, datePurchased:new Date().toLocaleDateString(), seed:Math.random()}]}));
   trackEvent('buy_crypto', {sym:coin.sym, qty, cost});
   setCryptoBuyModal(null); setCryptoBuyQty('');
@@ -7534,7 +7557,7 @@ const buyProperty = (prop) => {
   const cc = Math.round(prop.price * 0.03);
   const total = dp + cc;
   if (total > portfolio.cash) return false;
-  setMyProps(prev => [...prev, {...prop, purchasePrice:prop.price, purchaseDate:new Date().toLocaleDateString(), equity:dp, mortgage:prop.price-dp, loanRate: +(RE_BASE_RATE + 0.75 + ctier.mortgageAdj).toFixed(3), status:'vacant', tenant:null, rentSet:prop.estimatedRent, flipBudget:0, flipStarted:null}]);
+  setMyProps(prev => [...prev, {...prop, purchasePrice:prop.price, purchaseDate:new Date().toLocaleDateString(), boughtAt:Date.now(), equity:dp, mortgage:prop.price-dp, loanRate: +(RE_BASE_RATE + 0.75 + ctier.mortgageAdj).toFixed(3), status:'vacant', tenant:null, rentSet:prop.estimatedRent, flipBudget:0, flipStarted:null}]);
   setPortfolio(prev => ({...prev, cash:parseFloat((prev.cash-total).toFixed(2))}));
   setMlsProps(prev => prev.filter(p => p.id !== prop.id));
   trackEvent('buy_property', {address:prop.address, price:prop.price});
@@ -7544,7 +7567,11 @@ const sellPropertyFn = (propId) => {
   const prop = myProps.find(p => p.id === propId);
   if (!prop) return null;
   if (!hasReLicense) return 'needs_license';
-  const salePrice = Math.round(prop.price * (1 + prop.appreciationRate * 0.5));
+  const market = Math.round(prop.price * (1 + (prop.appreciationRate || 0.03) * 0.5));
+  // Reselling within a sim month of buying: the buyer's appraiser uses your own sale as the comp, so you get at most what you
+  // paid. Without this, buying a motivated seller's house below list and dumping it the same minute was a repeatable money loop.
+  const quick = prop.boughtAt && Date.now() - prop.boughtAt < 86400000 && prop.purchasePrice > 0;
+  const salePrice = quick ? Math.min(market, Math.round(prop.purchasePrice)) : market;
   const sellCosts = Math.round(salePrice * 0.06);
   const proceeds = Math.max(0, salePrice - sellCosts - (prop.mortgage || 0));
   setMyProps(prev => prev.filter(p => p.id !== propId));
@@ -7589,14 +7616,16 @@ const collectAllRentFn = () => {
 };
 const collectRentFn = () => collectAllRentFn();
 const startFlipFn = (propId, budget) => {
-  if (budget > portfolio.cash) return false;
+  budget = Math.round(Number(budget) * 100) / 100;
+  if (!(budget > 0) || budget > portfolio.cash) return false;   // a negative/NaN budget used to ADD cash
+  const fp = myProps.find(p => p.id === propId); if (!fp || fp.status === 'flipping') return false;
   setMyProps(prev => prev.map(p => p.id === propId ? {...p, status:'flipping', flipBudget:budget, flipStarted:new Date().toLocaleDateString(), flipStartedAt:Date.now()} : p));
   setPortfolio(prev => ({...prev, cash:parseFloat((prev.cash-budget).toFixed(2))}));
   return true;
 };
 const completeFlipFn = (propId) => {
   const prop = myProps.find(p => p.id === propId);
-  if (!prop) return 0;
+  if (!prop || prop.status !== 'flipping') return 0;
   const FLIP_MS = 86400000;   // renovation takes one real day
   if (prop.flipStartedAt && Date.now() - prop.flipStartedAt < FLIP_MS) return { waitMs: FLIP_MS - (Date.now() - prop.flipStartedAt) };
   const arv = prop.arv || Math.round(prop.price * 1.25);
@@ -7846,11 +7875,12 @@ const handleBuyStock = () => {
 const qty = parseFloat(buyQty);
 if (!qty || qty <= 0 || isNaN(qty)) return;
 const price = getLivePrice(buyModal.sym);
-const cost = parseFloat((qty * price).toFixed(2));
-if (cost > portfolio.cash) return;
+if (!(price > 0) || !Number.isFinite(qty)) return;
+const cost = centsUp(qty * price);
+if (!(cost >= 0.01) || cost > portfolio.cash) return;   // no free shares from orders that round to $0.00
 const type = buyModal.d.sector === 'ETF' ? 'ETF' : buyModal.d.sector === 'Bond' ? 'Bond' : 'Stock';
 const _sym = buyModal.sym;
-setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, { id: Date.now(), name: _sym, type, quantity: qty, purchasePrice: price, datePurchased: new Date().toLocaleDateString(), seed: Math.random() }] }));
+setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, { id: Date.now(), name: _sym, type, quantity: qty, purchasePrice: price, datePurchased: new Date().toLocaleDateString(), seed: Math.random(), buyDay: daysElapsed }] }));
 trackEvent('buy_stock', { sym: buyModal.sym, qty, cost });
 setBuyModal(null);
 setBuyQty('');
@@ -7858,7 +7888,8 @@ setBuyQty('');
 const sellInvestment = (id) => {
   const inv = portfolio.investments.find(i => i.id === id);
   if (!inv) return;
-  const proceeds = parseFloat((calculateCurrentPrice(inv) * inv.quantity).toFixed(2));
+  const proceeds = centsDown(calculateCurrentPrice(inv) * inv.quantity);
+  if (!Number.isFinite(proceeds)) return;
   if (!window.confirm('Sell ' + inv.quantity + ' ' + inv.name + ' for ' + fmtMoney(proceeds) + '?')) return;
   setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash + proceeds).toFixed(2)), investments: prev.investments.filter(i => i.id !== id) }));
   trackEvent('sell_investment', { sym: inv.name, qty: inv.quantity, proceeds });
@@ -7866,8 +7897,11 @@ const sellInvestment = (id) => {
 const calculateCurrentPrice = (investment) => {
 if (investment.type === 'Crypto') return getCryptoPrice(investment.name);
 // Today's price: live quote, else the backup price list, else what you paid (no made-up gains while prices load)
-if (daysElapsed === 0) return liveStockPrices[investment.name] || realStockData[investment.name]?.price || investment.purchasePrice;
-return simulatePrice(investment.purchasePrice, daysElapsed, investment.name, investment.type, investment.seed);
+// Time-machine growth only counts the sim days a holding was actually owned: buying at sim day 3,650 at today's price
+// used to be valued as if held for 10 years, an instant buy-then-sell profit. (Older holdings have no buyDay = day 0.)
+const held = daysElapsed - (investment.buyDay || 0);
+if (held <= 0) return liveStockPrices[investment.name] || realStockData[investment.name]?.price || investment.purchasePrice;
+return simulatePrice(investment.purchasePrice, held, investment.name, investment.type, investment.seed);
 };
 // One net-worth formula for every screen (Wallet, Portfolio, Me, achievements)
 const calcNetWorth = () => {
@@ -8324,7 +8358,7 @@ const mcxTrade = (t, qty, buy) => {
   if (buy && pos.shares + qty > floatShares) return alert('Only ' + floatShares.toLocaleString() + ' ' + t + ' shares are for sale on the market (the public float). Founders, insiders and big funds are holding the rest.');
   if (!buy && qty > pos.shares) return alert('You only own ' + pos.shares.toLocaleString() + ' shares.');
   const q = MQ.Market.quote(c, Date.now()), imp = MQ.Market.impact(c, qty);
-  const px = buy ? q.ask * (1 + imp / 2) : q.bid * (1 - imp / 2), amt = Math.round(px * qty * 100) / 100;
+  const px = buy ? q.ask * (1 + imp / 2) : q.bid * (1 - imp / 2), amt = buy ? centsUp(px * qty) : centsDown(px * qty);
   if (buy && amt > portfolio.cash) return alert('That costs ' + fmtMoney(amt) + ' and you have ' + fmtMoney(portfolio.cash) + ' in checking.');
   const before = pos.shares / total * 100, after = (pos.shares + (buy ? qty : -qty)) / total * 100;
   if (!window.confirm((buy ? 'Buy ' : 'Sell ') + qty.toLocaleString() + ' ' + t + ' at about $' + px.toFixed(2) + ' (' + fmtMoney(amt) + ')?' + (imp > 0.005 ? '\n\nYour order is big, so it moves the price about ' + (imp * 50).toFixed(1) + '% against you (price impact).' : ''))) return;
@@ -9391,7 +9425,7 @@ const PropertyDetailModal = ({prop, onClose, onBuy, mode}) => {
             e('button', {className: typeof prop.id === 'string' && !prop.isHome ? 'btn-ghost' : 'btn btn-primary', style:{width:'100%'}, onClick:()=>onBuy(prop), disabled:!canAfford, title:'Skips agents, loans and closing: 20% down + 3% closing costs at the list price.'}, canAfford ? (prop.isHome ? '🏡 Buy my home in Money City' : typeof prop.id === 'string' ? '⚡ Quick buy at list price' : '🏠 Buy Property') : '⚠️ Not enough cash yet'),
             !canAfford && e('button', {className:'btn-ghost', style:{width:'100%',fontSize:12,color:'#fbbf24',border:'1px solid rgba(251,191,36,0.3)',borderRadius:8,padding:'6px 12px'}, onClick:()=>{if(onClose)onClose(); setInvestmentTab('loans');}}, "🏦 Get a Loan from FirstCity Bank →")
           ),
-          mode === 'wholesale' && !already && e('button', {className:'btn btn-primary', style:{flex:1,minWidth:140,background:'#f59e0b',borderColor:'#f59e0b'}, onClick:()=>{setWholesaleModal(prop);onClose();}}, '📋 Wholesale This'),
+          mode === 'wholesale' && !already && !wholesaled.includes(prop.id) && e('button', {className:'btn btn-primary', style:{flex:1,minWidth:140,background:'#f59e0b',borderColor:'#f59e0b'}, onClick:()=>{setWholesaleModal(prop);onClose();}}, '📋 Wholesale This'),
           already && e('span', {style:{color:'var(--text-secondary)',fontSize:13,padding:'10px 0'}}, '✓ You own this property'),
           e('button', {className:'btn-ghost', style:{flex:1,minWidth:140}, onClick:()=>{ onClose(); setDealPrefill({ seq:Date.now(), deal:{ address:prop.address, city:prop.city + (prop.state ? ', ' + prop.state : ''), sqft:prop.sqft, bbg:prop.beds + ' bd / ' + prop.baths + ' ba', built:String(prop.yearBuilt || ''), lead:'Money City MLS', market:prop.forSale ? 'MLS' : 'Off Market',
             offer:prop.price, flipArv:prop.arv, wtArv:prop.arv, rArv:prop.arv, ofMarket:prop.arv, ofSale:Math.round(prop.arv * 1.09 / 1000) * 1000, flipRehab:prop.repairCost || Math.round(prop.sqft * 20), rent:prop.estimatedRent,
@@ -9815,7 +9849,7 @@ const WholesalePanel = () => {
         e('div', {style:{display:'flex',flexDirection:'column',gap:10}},
           ...WHOLESALE_BUYERS.filter(b=>b.cash >= wholesaleModal.price).map(buyer => {
             const mao = Math.round((wholesaleModal.arv||wholesaleModal.price*1.3)*0.70-(wholesaleModal.repairCost||0));
-            const offerPrice = Math.round(mao * (0.82 + Math.random()*0.12));
+            const offerPrice = Math.round(mao * (0.82 + seededRng(reHashStr('ws|' + wholesaleModal.id + '|' + buyer.name))()*0.12));   // fixed per deal+buyer (re-opening used to re-roll the fee)
             const assignFee = Math.max(0, offerPrice - wholesaleModal.price);
             return e('div', {key:buyer.name, style:{background:'var(--dark-bg)',borderRadius:8,padding:'12px 14px'}},
               e('div', {style:{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:8}},
@@ -9827,7 +9861,7 @@ const WholesalePanel = () => {
                 e('div', {style:{textAlign:'right'}},
                   e('div', {style:{fontSize:16,fontWeight:800,color:'var(--success)'}}, '+'+fmtMoney(assignFee)),
                   e('div', {style:{fontSize:11,color:'var(--text-secondary)',marginBottom:6}}, 'Your assignment fee'),
-                  e('button', {className:'btn btn-primary', style:{fontSize:12,padding:'6px 14px'}, onClick:()=>{ setPortfolio(prev=>({...prev,cash:parseFloat((prev.cash+assignFee).toFixed(2))})); setMlsProps(prev=>prev.filter(p=>p.id!==wholesaleModal.id)); setWholesaleModal(null); alert('Deal assigned! You earned '+fmtMoney(assignFee)+' assignment fee.'); }}, 'Assign Contract')
+                  e('button', {className:'btn btn-primary', style:{fontSize:12,padding:'6px 14px'}, onClick:()=>{ if (wholesaled.includes(wholesaleModal.id) || myProps.some(p=>p.id===wholesaleModal.id)) { setWholesaleModal(null); return; } const ws=[...wholesaled, wholesaleModal.id].slice(-500); setWholesaled(ws); try { localStorage.setItem(k('wholesaled'), JSON.stringify(ws)); } catch {} setPortfolio(prev=>({...prev,cash:parseFloat((prev.cash+assignFee).toFixed(2))})); setMlsProps(prev=>prev.filter(p=>p.id!==wholesaleModal.id)); setWholesaleModal(null); alert('Deal assigned! You earned '+fmtMoney(assignFee)+' assignment fee.'); }}, 'Assign Contract')
                 )
               )
             );
