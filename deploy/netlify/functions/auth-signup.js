@@ -123,7 +123,9 @@ async function signup(event) {
     return S.json(503, { error: MSG.down });
   }
 
-  // 3. Progress row (ignore "already exists" — e.g. left over from an old client).
+  // 3. Progress row. A row for this email can only be an orphan (no account existed until now) —
+  //    possibly planted through the old open table — so drop it rather than inherit it.
+  await S.supa('DELETE', `progress?email=eq.${S.q(email)}`, { prefer: 'return=minimal' });
   const prog = await S.supa('POST', 'progress', {
     body: { email, portfolio: { cash: 0, investments: [], debt: 0 } },
     prefer: 'return=minimal',
