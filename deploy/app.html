@@ -881,19 +881,11 @@ progress {
 </style>
 </head>
 <body>
-    <!-- Netlify form: records every access-code use so the owner can track/burn codes -->
-    <form name="code-used" netlify netlify-honeypot="bot-field" hidden>
-        <input type="text" name="code" />
-        <input type="text" name="email" />
-        <input type="text" name="name" />
-        <input type="text" name="bot-field" />
-    </form>
     <div class="bg-top-glow"></div>
     <div class="bg-orb bg-orb-1"></div>
     <div class="bg-orb bg-orb-2"></div>
     <div class="bg-orb bg-orb-3"></div>
     <div id="root"></div>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js"></script>
     <!-- ═══ Money Quest World engine modules (one script tag per system) ═══ -->
 <script>/* ═══ MONEY QUEST WORLD · core: namespace, event bus, helpers ═══════════════════════════════
    The world is split into small modules (one script tag each) that only talk through MQW.Events
@@ -2994,6 +2986,14 @@ const clearLocalUserData = () => {
   } catch {}
   [TOKEN_KEY, 'investedSession', 'adminAnalytics', ...LEGACY_PII_KEYS].forEach(lsDel);
 };
+// Remove per-user data of every account except `email` (older versions never cleaned up on shared devices)
+const clearOtherUsersData = (email) => {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.forEach(key => { if (key && key.indexOf('::') > 0 && !key.endsWith('::' + email)) localStorage.removeItem(key); });
+  } catch {}
+};
 
 // Cloud progress (progress function). Saves are batched: every change is merged into one pending body that is
 // sent at most every 2 s (the server allows 120 requests/user/min). Failed saves are retried with back-off and the
@@ -3135,14 +3135,48 @@ const applyProgressToLocal = (email, p) => {
   }
   if (obj(p.real_estate) && Array.isArray(p.real_estate.myProps)) {
     const localAt = parseInt(lsGet(k('reSavedAt')) || '0') || 0, at = finNum(p.real_estate.savedAt, 0, Date.now(), 0);
-    if (at >= localAt) {
-      const re = reScrubRE(p.real_estate.myProps, p.real_estate.reTenants);
-      lsSet(k('myProps'), JSON.stringify(re.myProps));
-      lsSet(k('reTenants'), JSON.stringify(re.reTenants));
+    if (at >= localAt) {   // scrubbed by reMigrateLocalHomes when the app opens (it also cleans the economy text)
+      lsSet(k('myProps'), JSON.stringify(p.real_estate.myProps));
+      lsSet(k('reTenants'), JSON.stringify(obj(p.real_estate.reTenants) ? p.real_estate.reTenants : {}));
       lsSet(k('reSavedAt'), String(at));
     }
   }
-  if (obj(p.economy)) restoreExtras(email, p.economy.extras);
+  if (obj(p.economy)) {
+    const ec = p.economy, at = finNum(ec.savedAt, 0, Date.now(), 0), localAt = parseInt(lsGet(k('econSavedAt')) || '0') || 0;
+    if (at > localAt) {
+      [['bank', 'bank'], ['loans', 'loans'], ['myBonds', 'myBonds'], ['econ', 'econ'], ['market', 'market']].forEach(([c, n]) => { if (ec[c] != null) lsSet(k(n), JSON.stringify(ec[c])); });
+      lsSet(k('econSavedAt'), String(at));
+    }
+    restoreExtras(email, ec.extras);
+  }
+};
+// Older versions saved a "Find my home" street address. When the app opens, replace it everywhere in this user's
+// saved data (property list, money ledger, bills, texts) and mark the cleaned copies newer so they replace the cloud copy.
+const reMigrateLocalHomes = (email) => {
+  const raw = lsJSON('myProps::' + email, '[]');
+  if (!Array.isArray(raw)) return;
+  const isLookup = (p) => reIsPrivateHome(p) && (p.homeLookup || p.confidence !== undefined || p.explain !== undefined);
+  const needs = raw.some(p => reIsPrivateHome(p) && (p.zip !== undefined || p.geo !== undefined || (isLookup(p) && (p.address !== 'My home' || !/^home_/.test(String(p.id))))
+    || (Number.isFinite(Number(p.lat)) && reRound2(p.lat) !== Number(p.lat)) || (Number.isFinite(Number(p.lng)) && reRound2(p.lng) !== Number(p.lng))));
+  if (!needs) return;
+  const addrs = [...new Set(raw.filter(p => isLookup(p) && typeof p.address === 'string' && p.address !== 'My home' && p.address.trim().length >= 5).map(p => JSON.stringify(p.address).slice(1, -1)))];
+  if (addrs.length) {
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+      keys.filter(key => key && key.endsWith('::' + email) && key !== 'myProps::' + email).forEach(key => {
+        let v = localStorage.getItem(key), changed = false;
+        if (!v) return;
+        addrs.forEach(a => { if (v.indexOf(a) >= 0) { v = v.split(a).join('My home'); changed = true; } });
+        if (changed) localStorage.setItem(key, v);
+      });
+    } catch {}
+  }
+  const re = reScrubRE(raw, lsJSON('reTenants::' + email, '{}')), now = String(Date.now());
+  lsSet('myProps::' + email, JSON.stringify(re.myProps));
+  lsSet('reTenants::' + email, JSON.stringify(re.reTenants));
+  lsSet('reSavedAt::' + email, now);
+  if (addrs.length && lsGet('econ::' + email) != null && lsGet('bank::' + email) != null) lsSet('econSavedAt::' + email, now);
 };
 // Money Quest save score: higher = further along; used to pick local vs cloud.
 const kqSaveScore = (s) => s && typeof s === 'object' ? (s.xp || 0) * 1000 + (s.plays || 0) : -1;
@@ -4446,6 +4480,7 @@ const [agree, setAgree] = useState(false);
 const [ageBlocked, setAgeBlocked] = useState(() => { try { return sessionStorage.getItem('mqAgeBlock') === '1'; } catch { return false; } });
 const [error, setError] = useState(notice || '');
 const [loading, setLoading] = useState(false);
+const busyRef = React.useRef(false);
 // Forgot-password state (3-step: email → verify code → new password)
 const [forgotEmail,    setForgotEmail]    = useState('');
 const [forgotLoading,  setForgotLoading]  = useState(false);
@@ -4481,7 +4516,7 @@ const handleVerifyCode = () => {
 // Step 3 — set the new password
 const handleConfirmReset = async () => {
   setError('');
-  if (forgotPw.length < 6) { setError('Password must be at least 6 characters.'); return; }
+  if (forgotPw.trim().length < 8) { setError('Password must be at least 8 characters.'); return; }
   if (forgotPw !== forgotPw2) { setError('Passwords do not match.'); return; }
   setForgotLoading(true);
   try {
@@ -4533,7 +4568,7 @@ const submit = async (ev) => {
 ev.preventDefault();
 // The forgot-password steps have their own buttons; Enter there must not submit the hidden sign-in form
 if (mode === 'forgot' || mode === 'admin' || mode === 'practice') return;
-if (loading) return;
+if (busyRef.current) return;   // a ref, not state: double-clicks / repeated Enter arrive before a re-render
 setError('');
 const em = email.trim().toLowerCase();
 if (mode === 'signup') {
@@ -4552,7 +4587,7 @@ if (mode === 'signup') {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError('Please enter a valid email address.'); return; }
   if (!password) { setError('Please enter your password.'); return; }
 }
-setLoading(true);
+setLoading(true); busyRef.current = true;
 try {
   if (mode === 'signup') {
     // ageBand / consentVersion are sent for the server to record once it stores them (never the exact age)
@@ -4579,8 +4614,9 @@ try {
     return;
   }
   // Load the cloud copy before the app opens. If that fails, stop: opening with an empty device would
-  // overwrite the saved progress with a fresh start.
-  clearLocalUserData();
+  // overwrite the saved progress with a fresh start. A device cache from another account is removed first.
+  const prev = getSession();
+  if (!prev || prev.email !== u.email) clearLocalUserData(); else { purgeLegacyData(); clearOtherUsersData(u.email); }
   setToken(r.data.token);
   Cloud.begin(u.email);
   const pr = await Cloud.loadAll(true);
@@ -4597,7 +4633,7 @@ try {
   setError('Something went wrong. Please try again.');
   console.error('Sign-in error:', err && err.message);
 } finally {
-  setLoading(false);
+  busyRef.current = false; setLoading(false);
 }
 };
 const signupGate = mode === 'signup' && (ageBlocked || !age);   // age first: nothing else is asked until it is answered
@@ -4625,7 +4661,7 @@ e('label', { className:'field-label' }, 'Admin Email'),
 e('input', { className:'input-field', type:'email', value:email, onChange:(ev)=>setEmail(ev.target.value), placeholder:'Admin email', autoComplete:'email' }),
 e('label', { className:'field-label' }, 'Password'),
 e('input', { className:'input-field', type:'password', value:password, onChange:(ev)=>setPassword(ev.target.value), placeholder:'Admin password', autoComplete:'current-password' }),
-e('div', { style:{textAlign:'center', color:'var(--text-secondary)', fontSize:12, margin:'2px 0 8px'} }, 'All three are required.'),
+e('div', { style:{textAlign:'center', color:'var(--text-secondary)', fontSize:12, margin:'2px 0 8px'} }, '— and your admin access code (all three are required) —'),
 e('label', { className:'field-label' }, 'Admin Access Code'),
 e('input', { className:'input-field', value:adminCode, onChange:(ev)=>setAdminCode(ev.target.value), placeholder:'ADMIN-XXXX-XXXX', style:{textTransform:'uppercase'} }),
 e('button', { type:'button', className:'btn btn-primary', style:{width:'100%', padding:'13px', marginTop:4, background:'linear-gradient(135deg,#7c3aed,#4c1d95)'}, onClick:handleAdminLogin }, '🔐 Access Admin Panel')
@@ -4760,7 +4796,7 @@ mode === 'forgot'
             'Code entered for ', e('strong', {}, forgotEmail), ' · it is checked when you save'
           ),
           e('label', { className: 'field-label' }, 'New Password'),
-          e('input', { className: 'input-field', type: 'password', value: forgotPw, onChange: ev => setForgotPw(ev.target.value), placeholder: 'At least 6 characters', autoComplete: 'new-password', autoFocus: true }),
+          e('input', { className: 'input-field', type: 'password', value: forgotPw, onChange: ev => setForgotPw(ev.target.value), placeholder: 'At least 8 characters', autoComplete: 'new-password', autoFocus: true }),
           e('label', { className: 'field-label' }, 'Confirm Password'),
           e('input', { className: 'input-field', type: 'password', value: forgotPw2, onChange: ev => setForgotPw2(ev.target.value), placeholder: 'Re-enter password', autoComplete: 'new-password',
             onKeyDown: ev => { if (ev.key === 'Enter') handleConfirmReset(); }
@@ -7379,8 +7415,9 @@ const CityWorld = ({ storeKey, cloudSave, cloudLoad, track, ticker, cash, netWor
     )
   );
 };
-const FinanceEd = ({ user, onSignOut }) => {
+const FinanceEd = ({ user, onSignOut, onDeleteData }) => {
 const k = (name) => name + '::' + user.email;
+useState(() => { if (!user.practice) reMigrateLocalHomes(user.email); return 0; });   // runs once, before the loaders below
 const [selectedLesson, setSelectedLesson] = useState(null);
 const [lessonNotes, setLessonNotes] = useState(() => lsJSON(k('lessonNotes'), '{}'));
 const [completedLessons, setCompletedLessons] = useState(() => { const v = lsJSON(k('completedLessons'), '[]'); return Array.isArray(v) ? [...new Set(v.filter(x => typeof x === 'number' || typeof x === 'string'))] : []; });
@@ -7407,8 +7444,9 @@ const [cryptoBuyQty, setCryptoBuyQty] = useState('');
 // which used to let the same deal be assigned again and again for a fresh fee.
 const [wholesaled, setWholesaled] = useState(() => { const v = lsJSON(k('wholesaled'), '[]'); return Array.isArray(v) ? v : []; });
 const [mlsProps, setMlsProps] = useState(() => generateMLS().filter(p => !wholesaled.includes(p.id)));
-const [myProps, setMyProps] = useState(() => reScrubRE(lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0), lsJSON(k('reTenants'), '{}')).myProps);
-const [reTenants, setReTenants] = useState(() => reScrubRE(lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0), lsJSON(k('reTenants'), '{}')).reTenants);
+const [reInit] = useState(() => reScrubRE(lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0), lsJSON(k('reTenants'), '{}')));
+const [myProps, setMyProps] = useState(reInit.myProps);
+const [reTenants, setReTenants] = useState(reInit.reTenants);
 const [hasReLicense, setHasReLicense] = useState(() => lsJSON(k('reLicense'), 'false'));
 const [reTab, setReTab] = useState('mls');
 const [mlsSearch, setMlsSearch] = useState('');
@@ -9649,10 +9687,14 @@ const reFindHome = async (ev) => {
       setHomeForm(Object.assign({}, f, { loading:false, err: j && j.error === 'not_found' ? "We couldn't match that address. Check the spelling and ZIP code, or pick a house near you on the map instead." : 'Please type your full street address.' }));
       return;
     }
-    const p = reNormalize(Object.assign({}, j.property, { isHome:true, valueLow:j.valueLow, valueHigh:j.valueHigh, explain:j.explain, confidence:j.confidence, source:j.source }));
-    setMapListings(prev => [...prev.filter(x => x.id !== p.id), p]);
+    // Privacy: the street address, ZIP, census tract and exact location are used once and never kept. The home
+    // gets a random id (the server's id is derived from the address) and coordinates rounded to ~1 km.
+    const exact = { lat: Number(j.property.lat), lng: Number(j.property.lng) };
+    const p = reNormalize(reScrubHome(Object.assign({}, j.property, { id:'home_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), homeLookup:true,
+      isHome:true, valueLow:j.valueLow, valueHigh:j.valueHigh, explain:j.explain, confidence:j.confidence, source:j.source })));
+    setMapListings(prev => [...prev.filter(x => !(x.isHome && x.homeLookup)), p]);
     setMapPlace({ city: p.city, state: p.state });
-    setMapFly({ lat:p.lat, lng:p.lng, zoom:17, seq:Date.now() });
+    if (Number.isFinite(exact.lat) && Number.isFinite(exact.lng)) setMapFly({ lat:exact.lat, lng:exact.lng, zoom:17, seq:Date.now() });   // in memory only
     setHomeForm(null);
     setSelectedProp(p);
     trackEvent('find_my_home', { source: j.source });
@@ -9743,7 +9785,8 @@ const MLSPanel = () => {
         e('h2', { id:'re-home-title', style:{ fontSize:20, fontWeight:800, marginBottom:6 } }, '📍 Find my home'),
         e('p', { style:{ fontSize:13, color:'var(--text-secondary)', marginBottom:12, lineHeight:1.5 } }, 'See what your home might be worth and buy it in Money City. The value is an estimate for learning, not an appraisal.'),
         e('div', { role:'note', style:{ background:'rgba(255,159,28,0.12)', border:'1px solid #FF9F1C', borderRadius:10, padding:'10px 12px', fontSize:13, marginBottom:14, lineHeight:1.5 } },
-          '👪 Ask a parent or guardian before entering your home address. Your address is saved with your account so you can see your home in My Properties.'),
+          '👪 Ask a grown-up first. We use your address once to estimate a value and don\'t save it: in the game your house is called "My home" and its map pin is placed near (not on) your street. ',
+          e('a', { href:'privacy.html#home', target:'_blank', rel:'noopener', style:{ color:'inherit', textDecoration:'underline' } }, 'Privacy details')),
         e('label', { className:'re-label' }, 'Street address', e('input', { className:'re-field', value:hf.street, autoComplete:'street-address', placeholder:'1234 Main St', onChange:(ev) => setHomeForm(Object.assign({}, hf, { street:ev.target.value })) })),
         e('div', { style:{ display:'grid', gridTemplateColumns:'2fr 1fr 1.2fr', gap:8 } },
           e('label', { className:'re-label' }, 'City', e('input', { className:'re-field', value:hf.city, autoComplete:'address-level2', onChange:(ev) => setHomeForm(Object.assign({}, hf, { city:ev.target.value })) })),
@@ -10218,6 +10261,7 @@ const lesson = curriculum.flatMap(u => u.lessons).find(l => l.id === parseInt(le
 return { lessonId, content, lesson };
 }).filter(n => n.content && n.lesson);
 return e('div', { className: 'container', style: { paddingTop: '24px' } },
+e('p', { style: { color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 } }, '🔒 Notes save to your account. Please don\'t type personal info (phone, address, school) in them.'),
 notesArray.length === 0 ? e('div', { className: 'card', style: { textAlign: 'center', padding: '40px' } },
 e('p', { style: { color: 'var(--text-secondary)' } }, 'No notes yet. Start taking notes in lessons to see them here.')
 ) : e('div', {},
@@ -10411,8 +10455,13 @@ e('div', {},
       e('div', { className:'user-avatar', style:{ width:48, height:48, fontSize:22 } }, (user.name || '?').charAt(0).toUpperCase()),
       e('div', { style:{ flex:1, minWidth:140 } }, e('div', { style:{ fontWeight:700, fontSize:18 } }, user.name), e('div', { className:'kq-sub', style:{ margin:0 } }, user.practice ? 'Practice Mode' : user.email)),
       e('button', { type:'button', className:'kq-chip', onClick: openFeedback }, '💬 Feedback'),
-      e('button', { type:'button', className:'kq-chip', onClick: onSignOut }, user.practice ? 'Exit Practice' : 'Sign Out')
-    )
+      e('button', { type:'button', className:'kq-chip', onClick: onSignOut }, user.practice ? 'Exit Practice' : 'Sign Out'),
+      !user.practice && onDeleteData && e('button', { type:'button', className:'kq-chip', onClick: onDeleteData, title:'Remove everything Money Quest saved on this device and sign out' }, '🗑️ Delete my data')
+    ),
+    e('div', { className:'kq-sub', style:{ margin:'8px 0 0', fontSize:12 } },
+      e('a', { href:'privacy.html', target:'_blank', rel:'noopener', style:{ color:'inherit' } }, 'Privacy Policy'), ' · ',
+      e('a', { href:'terms.html', target:'_blank', rel:'noopener', style:{ color:'inherit' } }, 'Terms of Use'), ' · ',
+      e('a', { href:'privacy.html#children', target:'_blank', rel:'noopener', style:{ color:'inherit' } }, 'How parents can review or delete data'))
   ),
   kqTrack !== 'pro' ? e('div', { className:'kq-page' },
     e('div', { className:'kq-top-card' },
@@ -10570,25 +10619,22 @@ return e('div', { className: 'modal-overlay', onClick: () => setBuyModal(null) }
 const AdminDashboard = ({ onSignOut }) => {
 const [tab, setTab] = useState('overview');
 const [search, setSearch] = useState('');
-const [users, setUsers] = useState(() => getUsers().filter(u => !u.isTester));
-useEffect(() => {
-  if (!db) return;
-  db.from('users').select('name,email,free_access,created_at').neq('email', TESTER_EMAIL).order('created_at', { ascending: false })
-    .then(({ data }) => { if (data && data.length > 0) setUsers(data.map(u => ({ name: u.name, email: u.email, freeAccess: u.free_access, created: u.created_at }))); });
-}, []);
-const codeLog = lsJSON('adminCodeLog', '[]');
-const analytics = lsJSON('adminAnalytics', '[]');
-const usedCodesCount = getUsedCodes().length;
-const totalCodes = 150; // total issued codes (hash list is now server-side)
-const totalLessons = curriculum.flatMap(u => u.lessons).length;
-const getUserLessons = (email) => lsJSON('completedLessons::' + email, '[]');
-const deleteUser = (email, name) => {
-if (!window.confirm('Permanently delete "' + name + '" (' + email + ')?\n\nThis removes their account and all progress.')) return;
-const updated = getUsers().filter(u => u.email !== email);
-saveUsers(updated);
-['completedLessons','lessonNotes','portfolio'].forEach(k => localStorage.removeItem(k+'::'+email));
-setUsers(updated);
+// User list comes from the admin-users function (service key on the server), authorised by the admin token
+const [users, setUsers] = useState([]);
+const [usersMsg, setUsersMsg] = useState('Loading users…');
+const loadUsers = async () => {
+  let token = ''; try { token = sessionStorage.getItem('investedAdminToken') || ''; } catch {}
+  if (!token) { onSignOut(); return; }
+  setUsersMsg('Loading users…');
+  const r = await apiCall('admin-users', { token });
+  if (r.status === 401) { try { sessionStorage.removeItem('investedAdminToken'); } catch {} onSignOut(); return; }
+  if (r.status !== 200 || !Array.isArray(r.data.users)) { setUsersMsg(apiErrorText(r, "Couldn't load users.")); return; }
+  setUsers(r.data.users.filter(u => u && typeof u.email === 'string').map(u => ({ name: String(u.name || ''), email: u.email, freeAccess: u.free_access === true, created: u.created_at || null })));
+  setUsersMsg('');
 };
+useEffect(() => { loadUsers(); }, []);
+const analytics = (() => { const v = lsJSON('adminAnalytics', '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x === 'object') : []; })();
+const freeCount = users.filter(u => u.freeAccess).length;
 const eventCounts = analytics.reduce((acc, ev) => { acc[ev.event]=(acc[ev.event]||0)+1; return acc; }, {});
 const filteredUsers = users.filter(u => !search || u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()));
 const TABS = [['overview','📊 Overview'],['users','👥 Users'],['codes','🔑 Codes'],['analytics','📈 Analytics'],['feedback','📬 Feedback']];
@@ -10601,7 +10647,7 @@ e('span', { className:'admin-badge' }, 'Admin')
 ),
 e('div', { style:{display:'flex',alignItems:'center',gap:12} },
 e('span', { style:S.muted }, 'Merrick Fluellen'),
-e('button', { className:'btn btn-secondary', onClick:onSignOut, style:{padding:'6px 14px',fontSize:12} }, 'Sign Out')
+e('button', { className:'btn btn-secondary', onClick:() => { try { sessionStorage.removeItem('investedAdminToken'); } catch {} onSignOut(); }, style:{padding:'6px 14px',fontSize:12} }, 'Sign Out')
 )
 ),
 e('div', { className:'admin-tabs' },
@@ -10612,11 +10658,11 @@ tab === 'overview' && e('div', {},
 e('div', { className:'grid-3', style:{marginBottom:20} },
 [
 {val:users.length, lbl:'Total Users'},
-{val:usedCodesCount+'/'+totalCodes, lbl:'Codes Used'},
-{val:totalCodes-usedCodesCount, lbl:'Codes Remaining'},
-{val:eventCounts.signup||0, lbl:'Sign-Ups Tracked'},
-{val:eventCounts.signin||0, lbl:'Sign-Ins Tracked'},
-{val:eventCounts.lesson_complete||0, lbl:'Lessons Completed'},
+{val:freeCount, lbl:'Free-Code Accounts'},
+{val:users.length-freeCount, lbl:'Paid-Code Accounts'},
+{val:eventCounts.signup||0, lbl:'Sign-Ups (this browser)'},
+{val:eventCounts.signin||0, lbl:'Sign-Ins (this browser)'},
+{val:eventCounts.lesson_complete||0, lbl:'Lessons (this browser)'},
 ].map((s,i) => e('div', {key:i, className:'admin-stat'},
 e('div', {className:'admin-stat-val'}, s.val),
 e('div', {className:'admin-stat-lbl'}, s.lbl)
@@ -10624,103 +10670,53 @@ e('div', {className:'admin-stat-lbl'}, s.lbl)
 ),
 e('div', { className:'card' },
 e('div', { style:S.title }, 'Recent Sign-Ups'),
-users.length === 0 ? e('p', {style:S.muted}, 'No users registered on this device yet.') :
+usersMsg ? e('p', {style:S.muted}, usersMsg) : users.length === 0 ? e('p', {style:S.muted}, 'No accounts yet.') :
 e('table', {className:'admin-table'},
 e('thead', {}, e('tr', {},
-e('th',{},'Name'), e('th',{},'Email'), e('th',{},'Joined'), e('th',{},'Progress')
+e('th',{},'Name'), e('th',{},'Email'), e('th',{},'Joined'), e('th',{},'Type')
 )),
 e('tbody', {},
-[...users].reverse().slice(0,10).map(u => {
-const done = getUserLessons(u.email).length;
-return e('tr', {key:u.email},
+users.slice(0,10).map(u => e('tr', {key:u.email},
 e('td', {style:{color:'#f5f7fa',fontWeight:600}}, u.name),
 e('td', {}, u.email),
 e('td', {}, u.created ? new Date(u.created).toLocaleDateString() : '—'),
-e('td', {},
-e('span', {style:S.red}, done),
-e('span', {style:{color:'#4b5563'}}, '/'+totalLessons),
-e('div', {className:'progress-bar',style:{width:80,marginTop:3}},
-e('div', {className:'progress-fill',style:{width:(done/totalLessons*100)+'%'}})
-)
-)
-);
-})
+e('td', {}, u.freeAccess ? e('span',{style:S.green},'Free code') : 'Paid code')
+))
 )
 )
 )
 ),
 tab === 'users' && e('div', {},
-e('input', { className:'admin-search', placeholder:'🔍  Search by name or email...', value:search, onChange:ev=>setSearch(ev.target.value) }),
-users.length === 0 ?
-e('div', {className:'card'}, e('p', {style:S.muted}, 'No users on this device yet.')) :
+e('div', { style:{display:'flex',gap:10,alignItems:'center',marginBottom:12} },
+e('input', { className:'admin-search', style:{marginBottom:0,flex:1}, placeholder:'🔍  Search by name or email...', value:search, onChange:ev=>setSearch(ev.target.value) }),
+e('button', { className:'btn btn-secondary', style:{padding:'8px 14px',fontSize:12}, onClick:loadUsers }, '↻ Refresh')
+),
+usersMsg ? e('div', {className:'card'}, e('p', {style:S.muted}, usersMsg)) :
+users.length === 0 ? e('div', {className:'card'}, e('p', {style:S.muted}, 'No accounts yet.')) :
 e('div', {className:'card'},
+e('p', {style:{...S.muted,fontSize:12,marginBottom:10}}, 'To delete an account or answer a parent\'s request, remove the user\'s rows in Supabase (users, progress, code_redemptions). An in-app delete needs a server function first.'),
 e('table', {className:'admin-table'},
 e('thead', {}, e('tr', {},
-e('th',{},'Name'), e('th',{},'Email'), e('th',{},'Joined'), e('th',{},'Lessons Done'), e('th',{},'Action')
+e('th',{},'Name'), e('th',{},'Email'), e('th',{},'Joined'), e('th',{},'Type')
 )),
 e('tbody', {},
-filteredUsers.map(u => {
-const done = getUserLessons(u.email).length;
-return e('tr', {key:u.email},
+filteredUsers.map(u => e('tr', {key:u.email},
 e('td', {style:{color:'#f5f7fa',fontWeight:600}}, u.name),
 e('td', {}, u.email),
 e('td', {}, u.created ? new Date(u.created).toLocaleDateString() : '—'),
-e('td', {},
-e('div', {},
-e('span', {style:S.green}, done),
-e('span', {style:{color:'#4b5563'}}, ' / '+totalLessons)
-),
-e('div', {className:'progress-bar',style:{width:90,marginTop:3}},
-e('div', {className:'progress-fill',style:{width:(done/totalLessons*100)+'%'}})
-)
-),
-e('td', {}, e('button', {className:'admin-del', onClick:()=>deleteUser(u.email, u.name)}, 'Delete'))
-);
-})
+e('td', {}, u.freeAccess ? e('span',{style:S.green},'Free code') : 'Paid code')
+))
 )
 )
 )
 ),
 tab === 'codes' && e('div', {},
-e('div', { className:'grid-3', style:{marginBottom:20} },
-[
-{val:totalCodes, lbl:'Total Codes', clr:'#f5f7fa'},
-{val:usedCodesCount, lbl:'Used', clr:'#ef4444'},
-{val:totalCodes-usedCodesCount, lbl:'Available', clr:'#10b981'},
-].map((s,i)=>e('div',{key:i,className:'admin-stat'},
-e('div',{className:'admin-stat-val',style:{color:s.clr}},s.val),
-e('div',{className:'admin-stat-lbl'},s.lbl)
-))
-),
-e('div', {className:'card',style:{marginBottom:16}},
-e('div', {style:{display:'flex',justifyContent:'space-between',marginBottom:6}},
-e('span', {style:S.muted}, 'Usage'),
-e('span', {style:{color:'var(--primary)',fontWeight:700,fontSize:13}}, Math.round(usedCodesCount/totalCodes*100)+'%')
-),
-e('div', {className:'progress-bar',style:{height:10}},
-e('div', {className:'progress-fill',style:{width:(usedCodesCount/totalCodes*100)+'%'}})
-)
-),
 e('div', {className:'card'},
-e('div', {style:S.title}, 'Code Redemption Log ('+codeLog.length+' entries)'),
-e('p', {style:{...S.muted,marginBottom:12,fontSize:12}},
-'⚠️ Entries are from this browser. For all devices, check your ',
-e('a', {href:'https://app.netlify.com',target:'_blank',rel:'noopener noreferrer',className:'admin-link'}, 'Netlify Forms dashboard'), '.'
-),
-codeLog.length === 0 ? e('p',{style:S.muted},'No codes redeemed on this device yet.') :
-e('table', {className:'admin-table'},
-e('thead',{},e('tr',{},
-e('th',{},'Code'),e('th',{},'Name'),e('th',{},'Email'),e('th',{},'Date')
-)),
-e('tbody',{},
-[...codeLog].reverse().map((entry,i)=>e('tr',{key:i},
-e('td',{style:{color:'var(--primary)',fontFamily:'monospace',fontWeight:700}},entry.code),
-e('td',{style:{color:'#f5f7fa'}},entry.name),
-e('td',{},entry.email),
-e('td',{},new Date(entry.date).toLocaleDateString())
-))
-)
-)
+e('div', {style:S.title}, '🔑 Access codes'),
+e('p', {style:{...S.muted,lineHeight:1.7}}, 'Codes are checked and redeemed on the server when an account is created, and each code works exactly once. ',
+'Every redemption is recorded in the Supabase table ', e('code',{},'code_redemptions'), ' (code hash, account email, date). ',
+'New codes are added to ', e('code',{},'access_codes'), ' as HMAC hashes (steps in supabase/README.md).'),
+e('p', {style:{...S.muted,marginTop:10}}, 'Accounts created so far: ', e('span',{style:S.red}, users.length))
 )
 ),
 tab === 'analytics' && e('div', {},
@@ -10741,7 +10737,7 @@ e('div',{className:'admin-stat-lbl'},ev.lbl)
 e('div', {className:'card'},
 e('div', {style:S.title}, 'Recent Activity Log'),
 e('p', {style:{...S.muted,fontSize:12,marginBottom:10}},
-'⚠️ Analytics are stored on this browser. Activity from students on other devices appears in Netlify Forms.'
+'⚠️ These counts only cover this browser. They contain no names or emails.'
 ),
 analytics.length===0 ? e('p',{style:S.muted},'No activity recorded yet.') :
 e('div', {style:{maxHeight:320,overflowY:'auto'}},
@@ -10760,10 +10756,10 @@ e('span', {style:{color:'#4b5563',fontSize:11,whiteSpace:'nowrap',marginLeft:8}}
 tab === 'feedback' && e('div', {},
 e('div', {className:'card',style:{marginBottom:16}},
 e('div', {style:S.title}, '📬 View Feedback & Form Submissions'),
-e('div', {className:'key-point',style:{marginBottom:16}}, 'Student feedback is collected via your Google Form. Code redemption logs are captured by Netlify Forms automatically on every signup.'),
+e('div', {className:'key-point',style:{marginBottom:16}}, 'Student feedback is collected via your Google Form. Code redemptions are recorded server-side in Supabase (code_redemptions).'),
 e('div', {style:{display:'flex',flexDirection:'column',gap:10}},
 e('a', {href:'https://app.netlify.com',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
-e('button', {className:'btn btn-primary',style:{width:'100%',padding:'13px',textAlign:'center'}}, '🌐 Netlify Dashboard — Code Redemption Forms')
+e('button', {className:'btn btn-primary',style:{width:'100%',padding:'13px',textAlign:'center'}}, '🌐 Netlify Dashboard')
 ),
 e('a', {href:'https://docs.google.com/forms/',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
 e('button', {className:'btn btn-secondary',style:{width:'100%',padding:'13px',textAlign:'center'}}, '📋 Google Forms — Student Feedback Responses')
@@ -10821,18 +10817,83 @@ return e('div', { className:'kq-root', style:{ minHeight:0, padding:0, backgroun
 const App = () => {
 // ?preview=1 skips login for local design checks only; on the live site it does nothing (it would bypass the paywall)
 const _previewMode = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) && new URLSearchParams(window.location.search).get('preview') === '1';
-const [user, setUser] = useState(() => _previewMode ? { name: 'Preview User', email: 'preview@test.com', practice: false } : getSession());
+const [user, setUser] = useState(() => _previewMode ? { name: 'Preview User', email: 'preview@test.com', practice: false } : null);
+// A stored token is checked with the server before anything opens (C1: the cached profile alone never signs anyone in)
+const [booting, setBooting] = useState(() => !_previewMode && !!getToken());
+const [authNotice, setAuthNotice] = useState('');
 const [showTutorial, setShowTutorial] = useState(false);
 const [isAdmin, setIsAdmin] = useState(false);
-const signOut = () => { setSession(null); setUser(null); setShowTutorial(false); };
+const userRef = React.useRef(null);
+useEffect(() => { userRef.current = user; if (user && !user.practice && !_previewMode) Cloud.begin(user.email); }, [user]);
+// Signed out by the server (expired token, password changed elsewhere): nothing can be saved any more
+// Clearing runs now and again after the app has unmounted (its unmount handlers write a last local save).
+const [wipeSeq, setWipeSeq] = useState(0);
+useEffect(() => { if (wipeSeq) clearLocalUserData(); }, [wipeSeq]);
+const wipeAndShowAuth = (notice) => {
+  Cloud.end(); clearLocalUserData();
+  setUser(null); setShowTutorial(false); setAuthNotice(notice || ''); setWipeSeq(n => n + 1);
+};
+const endSession = (notice) => wipeAndShowAuth(notice);
+useEffect(() => {
+  Cloud.onAuthLost(() => { if (userRef.current && !userRef.current.practice) endSession('Your session has ended. Please sign in again.'); });
+  if (!booting) { purgeLegacyData(); return; }
+  let alive = true, retry = null;
+  const check = async () => {
+    const token = getToken();
+    if (!token) { clearLocalUserData(); if (alive) setBooting(false); return; }
+    const r = await apiCall('auth-session', { token, timeoutMs: 10000 });
+    if (!alive) return;
+    const u = r.status === 200 ? userFromApi(r.data.user) : null;
+    if (u) {
+      const cached = getSession();
+      if (!cached || cached.email !== u.email) clearLocalUserData();   // the device cache belonged to someone else
+      setToken(r.data.token && TOKEN_RE.test(r.data.token) ? r.data.token : token);   // keep (or refresh) the session
+      purgeLegacyData(); clearOtherUsersData(u.email); setSession(u); setUser(u); setBooting(false);
+      return;
+    }
+    if (r.status === 401 || r.status === 200 || r.status === 400 || r.status === 403) { clearLocalUserData(); purgeLegacyData(); setBooting(false); return; }
+    // Server unreachable (offline, 429, 5xx): open this device's copy only if it belongs to the token's account and the
+    // token has not expired; saves wait in the queue, and the token is re-checked when the connection returns.
+    const c = tokenClaims(token), cached = getSession();
+    purgeLegacyData();
+    if (c && typeof c.exp === 'number' && c.exp * 1000 > Date.now() && cached && c.sub === cached.email) {
+      setUser({ name: cached.name, email: cached.email, free_access: cached.free_access === true, offline: true });
+      const recheck = async () => {
+        window.removeEventListener('online', recheck); clearTimeout(retry);
+        const r2 = await apiCall('auth-session', { timeoutMs: 10000 });
+        if (r2.status === 401) { endSession('Your session has ended. Please sign in again.'); return; }
+        if (r2.status === 200) { const u2 = userFromApi(r2.data.user); if (u2) { if (r2.data.token) setToken(r2.data.token); setSession(u2); if (u2.email !== cached.email) endSession(''); } return; }
+        window.addEventListener('online', recheck); retry = setTimeout(recheck, 60000);
+      };
+      window.addEventListener('online', recheck); retry = setTimeout(recheck, 60000);
+    } else {
+      setAuthNotice(r.status === 0 ? MSG_OFFLINE : r.status === 429 ? 'Too many requests. Please wait a minute and sign in again.' : MSG_DOWN);
+    }
+    setBooting(false);
+  };
+  check();
+  return () => { alive = false; clearTimeout(retry); };
+}, []);
+const signOut = async () => {
+  const u = userRef.current;
+  if (u && !u.practice && !_previewMode) { try { await Promise.race([Cloud.flush(), new Promise(r => setTimeout(r, 4000))]); } catch {} }   // last changes first
+  wipeAndShowAuth('');
+};
+const deleteMyData = async () => {
+  if (!window.confirm('Delete my data from this device?\n\nThis removes your progress, notes, game saves and sign-in from this browser and signs you out.\n\nYour account and the copy saved in the cloud are not deleted by this button. To delete those, a parent, guardian or you can contact us (see "How parents can review or delete data" in the Privacy Policy).')) return;
+  wipeAndShowAuth('Your data was removed from this device.');
+};
 const handleAuth = (u) => {
 // New players get the tutorial only; "What's New" is for people who used an older version
 if (u.isNew) { try { localStorage.setItem('investedPatchSeen', PATCH_VERSION); } catch {} setTimeout(() => setShowTutorial(true), 450); }
+setAuthNotice('');
+if (!u.practice) Cloud.begin(u.email);
 setUser(u);
 };
 if (isAdmin) return e(AdminDashboard, { onSignOut: () => setIsAdmin(false) });
+if (booting) return e('div', { className: 'auth-wrap', role: 'status', 'aria-live': 'polite' }, e('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: 15 } }, e('div', { style: { fontSize: 44, marginBottom: 10 } }, '🐷'), 'Signing you in…'));
 return e('div', {},
-user ? e(FinanceEd, { user, onSignOut: signOut }) : e(AuthScreen, { onAuth: handleAuth, onAdminAuth: () => setIsAdmin(true) }),
+user ? e(FinanceEd, { key: user.email, user, onSignOut: signOut, onDeleteData: user.practice ? null : deleteMyData }) : e(AuthScreen, { key: authNotice, notice: authNotice, onAuth: handleAuth, onAdminAuth: () => setIsAdmin(true) }),
 showTutorial && user && e(OnboardingTutorial, { user, onComplete: () => setShowTutorial(false) })
 );
 };
