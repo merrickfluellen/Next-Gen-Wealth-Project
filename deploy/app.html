@@ -2877,6 +2877,11 @@ const lsJSON = (key, fallbackJson) => {
   try { const raw = localStorage.getItem(key); return raw == null ? JSON.parse(fallbackJson) : JSON.parse(raw); }
   catch { return JSON.parse(fallbackJson); }
 };
+// Load-time validation for game saves (localStorage/cloud can be stale, hand-edited or corrupted):
+// numbers must be finite and in range, lists must be lists of objects. A bad save resets that field instead of crashing.
+const finNum = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt; };
+const lsList = (key, ok) => { const v = lsJSON(key, '[]'); return Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x) && (!ok || ok(x))) : []; };
+const lsDays = (key) => Math.floor(finNum(localStorage.getItem(key), 0, 36500, 0));   // time-machine days: 0..100 years
 const MARKET_ASOF = 'June 2025';
 const marketSnapshot = [
   { label: 'S&P 500', value: '≈ 6,200', note: 'Large-cap U.S. stock index' },
@@ -7264,13 +7269,16 @@ const FinanceEd = ({ user, onSignOut }) => {
 const k = (name) => name + '::' + user.email;
 const [selectedLesson, setSelectedLesson] = useState(null);
 const [lessonNotes, setLessonNotes] = useState(() => lsJSON(k('lessonNotes'), '{}'));
-const [completedLessons, setCompletedLessons] = useState(() => lsJSON(k('completedLessons'), '[]'));
+const [completedLessons, setCompletedLessons] = useState(() => { const v = lsJSON(k('completedLessons'), '[]'); return Array.isArray(v) ? [...new Set(v.filter(x => typeof x === 'number' || typeof x === 'string'))] : []; });
 const [searchDict, setSearchDict] = useState('');
-const [daysElapsed, setDaysElapsed] = useState(() => parseInt(localStorage.getItem(k('simDays')) || '0'));
-const [simTarget, setSimTarget] = useState(() => parseInt(localStorage.getItem(k('simTarget')) || '0'));
+const [daysElapsed, setDaysElapsed] = useState(() => lsDays(k('simDays')));
+const [simTarget, setSimTarget] = useState(() => lsDays(k('simTarget')));
 const [simPlaying, setSimPlaying] = useState(false);
 
-const [portfolio, setPortfolio] = useState(() => { const p = lsJSON(k('portfolio'), '{}'); return { cash: 0, debt: 0, ...(p && typeof p === 'object' ? p : {}), investments: Array.isArray(p && p.investments) ? p.investments : [] }; });
+const [portfolio, setPortfolio] = useState(() => { const p = lsJSON(k('portfolio'), '{}'), o = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+  const investments = (Array.isArray(o.investments) ? o.investments : []).filter(i => i && typeof i === 'object' && typeof i.name === 'string' && finNum(i.quantity, 0, 1e12, 0) > 0 && finNum(i.purchasePrice, 0, 1e9, -1) >= 0)
+    .map(i => ({ ...i, quantity: Number(i.quantity), purchasePrice: Number(i.purchasePrice), seed: finNum(i.seed, 0, 1, 0.5) }));
+  return { ...o, cash: Math.round(finNum(o.cash, -1e12, 1e12, 0) * 100) / 100, debt: finNum(o.debt, 0, 1e12, 0), investments }; });
 const [investmentTab, setInvestmentTab] = useState('wallet');
 const [buyModal, setBuyModal] = useState(null); // { sym, d } — stock selected for purchase
 const [buyQty, setBuyQty] = useState('');
@@ -7282,8 +7290,8 @@ const [cryptoLoading, setCryptoLoading] = useState(false);
 const [cryptoBuyModal, setCryptoBuyModal] = useState(null);
 const [cryptoBuyQty, setCryptoBuyQty] = useState('');
 const [mlsProps, setMlsProps] = useState(() => generateMLS());
-const [myProps, setMyProps] = useState(() => lsJSON(k('myProps'), '[]'));
-const [reTenants, setReTenants] = useState(() => lsJSON(k('reTenants'), '{}'));
+const [myProps, setMyProps] = useState(() => lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0));
+const [reTenants, setReTenants] = useState(() => { const v = lsJSON(k('reTenants'), '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; });
 const [hasReLicense, setHasReLicense] = useState(() => lsJSON(k('reLicense'), 'false'));
 const [reTab, setReTab] = useState('mls');
 const [mlsSearch, setMlsSearch] = useState('');
@@ -7301,8 +7309,8 @@ const [geoQ, setGeoQ] = useState('');
 const [geoState, setGeoState] = useState({ loading:false, results:null, msg:'' });
 const [homeForm, setHomeForm] = useState(null);         // {street,city,state,zip,loading,err}
 const mapReq = React.useRef(0);
-const [myBonds, setMyBonds] = useState(() => lsJSON(k('myBonds'), '[]'));
-const [loans, setLoans] = useState(() => lsJSON(k('loans'), '[]'));
+const [myBonds, setMyBonds] = useState(() => lsList(k('myBonds'), b => finNum(b.faceValue, 0, 1e10, -1) >= 0 && finNum(b.yield, 0, 100, -1) >= 0));
+const [loans, setLoans] = useState(() => lsList(k('loans'), l => finNum(l.balance, 0, 1e10, -1) >= 0 && finNum(l.rate, 0, 100, -1) >= 0));
 // FirstCity Bank: savings account + credit file (payment history). Math lives in MQ.Bank.
 const bankDefault = () => ({ savings: { balance: 0, earned: 0, lastAccrue: Date.now() }, credit: { history: [], firstAt: null, inquiries: [] }, notices: [] });
 const [bank, setBank] = useState(() => { const b = lsJSON(k('bank'), 'null'); return b && b.savings && b.credit ? { ...bankDefault(), ...b } : bankDefault(); });
@@ -7376,7 +7384,7 @@ const ACHIEVEMENT_DEFS = [
   {id:'lesson_10',  icon:'⭐', name:'Study Streak',    desc:'Complete 10 lessons',              check:()=>completedLessons.length>=10},
   {id:'millionaire',icon:'💎', name:'Millionaire',     desc:'Reach $1,000,000 net worth',       check:()=>calcNetWorth().net>=1000000},
 ];
-const [achievements, setAchievements] = useState(()=>lsJSON(k('achievements'), '[]'));
+const [achievements, setAchievements] = useState(()=>{ const v = lsJSON(k('achievements'), '[]'); return Array.isArray(v) ? v : []; });
 useEffect(()=>{
   const newU=ACHIEVEMENT_DEFS.filter(a=>!achievements.includes(a.id)&&a.check());
   if(newU.length>0){const u=[...achievements,...newU.map(a=>a.id)];setAchievements(u);localStorage.setItem(k('achievements'),JSON.stringify(u));}
@@ -7776,7 +7784,7 @@ const submitLoanApp = () => {
   setLoanApp(a => ({ ...a, step: 'deciding' }));
 };
 const fundLoan = () => {
-  const r = loanApp && loanApp.result, o = r && r.offer; if (!o) return;
+  const r = loanApp && loanApp.step === 'result' && loanApp.result, o = r && r.offer; if (!o) return;   // only from the offer screen: a second click can't fund it twice
   const P = r.product, now = Date.now();
   if (P.id === 'builder' && portfolio.cash < o.fee) return alert('You need ' + fmtMoney(o.fee) + ' in checking for the admin fee.');
   const loan = { id: now, product: P.id, principal: o.amount, balance: o.amount, rate: o.rate, apr: o.apr, termMonths: o.term, monthlyPayment: o.monthly, startDate: new Date().toLocaleDateString(), paymentsLeft: o.term, lastAccrue: now, autopay: true, purpose: loanApp.purpose, held: P.id === 'builder' ? o.amount : 0 };

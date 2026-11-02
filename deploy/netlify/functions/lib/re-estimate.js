@@ -211,7 +211,8 @@ async function rentcastListings(lat, lng, radiusMiles, geo, timeoutMs = 7000) {
   // Round the point so nearby map views share one paid call (and one cache entry)
   const j = await rc('/listings/sale', { latitude: lat.toFixed(3), longitude: lng.toFixed(3), radius: radius.toFixed(1), status: 'Active', limit: 40 }, timeoutMs);
   if (!Array.isArray(j) || !j.length) return null;
-  return j.slice(0, 200).map(x => fromRentcastListing(x, geo)).filter(Boolean).slice(0, 40);
+  const g = await geo;                          // may be a promise so the tract lookup runs in parallel
+  return j.slice(0, 200).map(x => fromRentcastListing(x, g)).filter(Boolean).slice(0, 40);
 }
 
 /** RentCast AVM for one address → { property, valueLow, valueHigh, rentLow, rentHigh, comps } or null */
