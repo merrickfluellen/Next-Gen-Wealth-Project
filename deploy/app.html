@@ -2945,7 +2945,7 @@ const applyProgressToLocal = (email, p) => {
   if (p.sim_target !== undefined) localStorage.setItem(k('simTarget'), String(p.sim_target));
   if (p.money_quest && typeof p.money_quest === 'object') {
     let local = null; try { local = lsJSON(k('moneyQuest'), 'null'); } catch {}
-    if (kqSaveScore(p.money_quest) >= kqSaveScore(local)) localStorage.setItem(k('moneyQuest'), JSON.stringify(p.money_quest));
+    localStorage.setItem(k('moneyQuest'), JSON.stringify(kqMerge(local, p.money_quest)));   // keep stars/stickers from both copies
   }
   if (p.real_estate && typeof p.real_estate === 'object' && Array.isArray(p.real_estate.myProps)) {
     const localAt = parseInt(localStorage.getItem(k('reSavedAt')) || '0') || 0;
@@ -5704,7 +5704,7 @@ const KQ_NAV = [
 ];
 const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerName, tab, setTab, extraView, completedLessons, onKidFirstComplete, onProComplete, launchPro, onLaunched, worldMode, worldView, onSignOut, onSimpleMode }) => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [st, setSt] = useState(() => { try { return { ...kqDefault(), ...lsJSON(storeKey, '{}') }; } catch { return kqDefault(); } });
+  const [st, setSt] = useState(() => { try { return kqSanitize(lsJSON(storeKey, '{}')); } catch { return kqDefault(); } });
   const saveTimer = React.useRef(null);
   const cloudReady = React.useRef(false);
   useEffect(() => {
@@ -5719,7 +5719,7 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
     if (!cloudLoad) { done(); return; }
     cloudLoad().then(cloud => {
       if (!alive) return;
-      if (cloud && typeof cloud === 'object') setSt(local => kqSaveScore(cloud) > kqSaveScore(local) ? { ...kqDefault(), ...cloud } : local);
+      if (cloud && typeof cloud === 'object' && !Array.isArray(cloud)) setSt(local => kqMerge(local, cloud));
       done();
     }).catch(done);
     return () => { alive = false; clearTimeout(saveTimer.current); };

@@ -35,9 +35,9 @@ function reply(event, status, obj, cache) {
 // Whole number inside [lo, hi], else 0 ("not given")
 function intIn(v, lo, hi) {
   if (v == null || v === '') return 0;
-  const s = String(v).trim();
-  if (!/^\d{1,6}$/.test(s)) return 0;
-  const n = Number(s);
+  const s = String(v).trim().replace(/,/g, '');
+  if (!/^\d{1,6}(\.\d{1,3})?$/.test(s)) return 0;
+  const n = Math.round(Number(s));
   return n >= lo && n <= hi ? n : 0;
 }
 
