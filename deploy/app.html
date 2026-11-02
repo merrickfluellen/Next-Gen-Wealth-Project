@@ -2919,169 +2919,247 @@ const PATCH_NOTES = {
     'Old daily quests that never paid out, and the second level system',
   ],
 };
-// ── SUPABASE ──────────────────────────────────────────────────────────────────
-const SUPA_URL = 'https://vtxuvmtnqlxidnswnunx.supabase.co';
-const SUPA_KEY = 'sb_publishable_aRiV5e4fjCdP0CMzbQqeig_StW4CK0x';
-const db = (window.supabase) ? window.supabase.createClient(SUPA_URL, SUPA_KEY) : null;
-
-const dbGetUser = async (email) => {
-  if (!db) return null;
-  try { const { data } = await db.from('users').select('*').eq('email', email).single(); return data; }
+// ── ACCOUNTS + CLOUD PROGRESS (Netlify functions; the browser never talks to the database) ─────────────
+// Sign-up / sign-in happen on the server (auth-signup / auth-login: scrypt passwords, access codes redeemed
+// once, rate limits). They return a signed session token, kept in localStorage.investedToken. Every progress
+// read/write sends it as "Authorization: Bearer"; the server picks the row from the token, never from
+// anything this page says. localStorage.investedSession is only a display cache: on startup the token is
+// re-checked with auth-session, and a session cache without a valid token never signs anyone in.
+const API_BASE = '/.netlify/functions/';
+const TOKEN_KEY = 'investedToken';
+const TOKEN_RE = /^[A-Za-z0-9._-]{16,4096}$/;
+const lsGet = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+const lsSet = (key, v) => { try { localStorage.setItem(key, v); } catch {} };
+const lsDel = (key) => { try { localStorage.removeItem(key); } catch {} };
+const getToken = () => { const t = lsGet(TOKEN_KEY) || ''; return TOKEN_RE.test(t) ? t : ''; };
+const setToken = (t) => { if (typeof t === 'string' && TOKEN_RE.test(t)) lsSet(TOKEN_KEY, t); else lsDel(TOKEN_KEY); };
+// Unverified peek at the token payload. Only used offline, to check the cached profile belongs to the token's
+// account and the token has not expired; the server does the real verification on every request.
+const tokenClaims = (t) => {
+  try { const p = JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); return p && typeof p === 'object' ? p : null; }
   catch { return null; }
 };
-const dbCreateUser = async (user) => {
-  if (!db) return false;
+const apiCall = async (fn, { method = 'GET', body, token, auth = true, timeoutMs = 15000, keepalive = false } = {}) => {
+  const headers = { Accept: 'application/json' };
+  const tk = token !== undefined ? token : (auth ? getToken() : '');
+  if (tk) headers.Authorization = 'Bearer ' + tk;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const { error } = await db.from('users').insert({ email: user.email, name: user.name, pw_hash: user.pw, free_access: user.freeAccess || false });
-    if (error) { console.warn('DB create user:', error); return false; }
-    await db.from('progress').insert({ email: user.email, portfolio: {"cash": 0, "investments": [], "debt": 0} });
-    return true;
-  } catch(err) { console.warn('DB create user:', err); return false; }
+    const res = await fetch(API_BASE + fn, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctrl ? ctrl.signal : undefined, keepalive, credentials: 'same-origin', cache: 'no-store' });
+    let data = null; try { data = await res.json(); } catch {}
+    const ra = parseInt(res.headers.get('Retry-After') || '', 10);
+    return { status: res.status, data: data && typeof data === 'object' && !Array.isArray(data) ? data : {}, retryAfter: Number.isFinite(ra) && ra > 0 ? Math.min(ra, 3600) : 0 };
+  } catch { return { status: 0, data: {}, retryAfter: 0 }; }
+  finally { if (timer) clearTimeout(timer); }
 };
-const dbLoadProgress = async (email) => {
-  if (!db) return null;
-  try { const { data } = await db.from('progress').select('*').eq('email', email).single(); return data; }
-  catch { return null; }
+const fmtWait = (s) => !s ? 'a few minutes' : s < 60 ? s + ' seconds' : Math.ceil(s / 60) + (Math.ceil(s / 60) === 1 ? ' minute' : ' minutes');
+const MSG_OFFLINE = "We couldn't reach the Money Quest server. Check your internet connection and try again.";
+const MSG_DOWN = 'Our server is having trouble right now. Please try again in a minute.';
+// Friendly text for a failed apiCall. Server messages are shown only for 4xx (they are written to be user-safe).
+const apiErrorText = (r, fallback) => {
+  const m = r && r.data && typeof r.data.error === 'string' && r.data.error.length <= 200 ? r.data.error : '';
+  if (!r || r.status === 0) return MSG_OFFLINE;
+  if (r.status === 429) return m || ('Too many tries. Please wait ' + fmtWait(r.retryAfter) + ' and try again.');
+  if (r.status >= 500) return MSG_DOWN;
+  return m || fallback;
 };
-const dbSaveProgress = (email, updates) => {
-  if (!db) return;
-  db.from('progress').update({ ...updates, updated_at: new Date().toISOString() }).eq('email', email).then(() => {});
+// Display cache of the signed-in profile (never trusted on its own; see the note above)
+const getSession = () => { const s = lsJSON('investedSession', 'null'); return s && typeof s === 'object' && typeof s.email === 'string' && s.email && typeof s.name === 'string' ? s : null; };
+const setSession = (u) => { if (u) lsSet('investedSession', JSON.stringify({ name: String(u.name || ''), email: String(u.email || ''), free_access: u.free_access === true })); else lsDel('investedSession'); };
+const userFromApi = (u) => (u && typeof u === 'object' && typeof u.email === 'string' && u.email && u.email.length <= 254)
+  ? { name: String(u.name || '').slice(0, 40), email: u.email, free_access: u.free_access === true } : null;
+// Data older versions of the app kept on the device: other accounts' emails/password hashes (investedUsers),
+// code-use logs with names/emails (adminCodeLog, usedCodes). None of it is used any more.
+const LEGACY_PII_KEYS = ['investedUsers', 'usedCodes', 'adminCodeLog'];
+const PII_FIELDS = ['name', 'email', 'address', 'street', 'zip', 'lat', 'lng'];
+const purgeLegacyData = () => {
+  LEGACY_PII_KEYS.forEach(lsDel);
+  try {
+    const log = lsJSON('adminAnalytics', '[]');
+    if (Array.isArray(log) && log.some(ev => ev && ev.data && PII_FIELDS.some(f => f in ev.data))) {
+      lsSet('adminAnalytics', JSON.stringify(log.map(ev => { const d = { ...((ev && ev.data) || {}) }; PII_FIELDS.forEach(f => delete d[f]); return { ...ev, data: d }; })));
+    }
+  } catch {}
 };
-const applyProgressToLocal = (email, p) => {
-  if (!p) return;
-  const k = (n) => n + '::' + email;
-  if (p.completed_lessons) localStorage.setItem(k('completedLessons'), JSON.stringify(p.completed_lessons));
-  if (p.lesson_notes) localStorage.setItem(k('lessonNotes'), JSON.stringify(p.lesson_notes));
-  if (p.portfolio) localStorage.setItem(k('portfolio'), JSON.stringify(p.portfolio));
-  if (p.sim_days !== undefined) localStorage.setItem(k('simDays'), String(p.sim_days));
-  if (p.sim_target !== undefined) localStorage.setItem(k('simTarget'), String(p.sim_target));
-  if (p.money_quest && typeof p.money_quest === 'object') {
-    let local = null; try { local = lsJSON(k('moneyQuest'), 'null'); } catch {}
-    localStorage.setItem(k('moneyQuest'), JSON.stringify(kqMerge(local, p.money_quest)));   // keep stars/stickers from both copies
+// Remove everything this app stored about people on this device: every per-user key ("<name>::<email>"),
+// the session and token, the local activity log and the legacy keys. Device settings (sound, graphics) stay.
+const clearLocalUserData = () => {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.forEach(key => { if (key && key.indexOf('::') > 0) localStorage.removeItem(key); });
+  } catch {}
+  [TOKEN_KEY, 'investedSession', 'adminAnalytics', ...LEGACY_PII_KEYS].forEach(lsDel);
+};
+
+// Cloud progress (progress function). Saves are batched: every change is merged into one pending body that is
+// sent at most every 2 s (the server allows 120 requests/user/min). Failed saves are retried with back-off and the
+// localStorage copy is always written first, so the app keeps working offline.
+const PROGRESS_COLS = ['lesson_notes', 'portfolio', 'completed_lessons', 'sim_days', 'sim_target', 'money_quest', 'real_estate', 'economy', 'world'];
+const Cloud = (() => {
+  const SAVE_EVERY = 2000;
+  let pending = {}, timer = null, busy = null, backoff = 0, solo = false, email = '';
+  let loadP = null, loadAt = 0;
+  const missing = new Set();
+  const handlers = { authLost: () => {} };
+  const unsyncedKey = () => 'cloudUnsynced::' + email;
+  const readUnsynced = () => { const v = lsJSON(unsyncedKey(), '[]'); return new Set(Array.isArray(v) ? v.filter(c => PROGRESS_COLS.includes(c)) : []); };
+  const writeUnsynced = (s) => { if (email) { if (s.size) lsSet(unsyncedKey(), JSON.stringify([...s])); else lsDel(unsyncedKey()); } };
+  const schedule = (ms) => { clearTimeout(timer); timer = setTimeout(() => { timer = null; flush(); }, Math.max(0, ms)); };
+  const requeue = (body) => { pending = Object.assign({}, body, pending); };   // anything queued since is newer and wins
+  const retryLater = (body, ms) => { requeue(body); backoff = ms; schedule(ms); };
+  async function send(keepalive) {
+    const token = getToken();
+    let cols = Object.keys(pending).filter(c => !missing.has(c));
+    if (!token || !email || !cols.length) { pending = {}; return; }
+    if (solo) cols = cols.slice(0, 1);   // the server could not say which column it rejected: try them one by one
+    const body = {}; cols.forEach(c => { body[c] = pending[c]; delete pending[c]; });
+    const who = email;
+    const r = await apiCall('progress', { method: 'POST', body, token, keepalive, timeoutMs: 20000 });
+    if (who !== email) return;   // signed out while the request was in flight
+    if (r.status === 200) {
+      backoff = 0;
+      const s = readUnsynced(); cols.forEach(c => { if (!(c in pending)) s.delete(c); }); writeUnsynced(s);
+    } else if (r.status === 401) {
+      pending = {}; handlers.authLost(); return;
+    } else if (r.status === 422 || r.status === 400 || r.status === 413) {
+      const col = r.data && typeof r.data.column === 'string' && cols.includes(r.data.column) ? r.data.column : (cols.length === 1 ? cols[0] : '');
+      if (!col) { solo = true; requeue(body); }
+      else {
+        if (r.status === 422) missing.add(col);   // column not created in Supabase yet: keep it on this device only
+        console.warn(r.status === 422 ? 'Cloud save for "' + col + '" is off until that column exists in Supabase.' : 'Cloud save for "' + col + '" was rejected (' + r.status + '); it stays saved on this device.');
+        const rest = { ...body }; delete rest[col]; requeue(rest);
+      }
+    } else if (r.status === 429) {
+      return retryLater(body, (r.retryAfter || 30) * 1000);
+    } else {   // offline, timeout, 5xx
+      return retryLater(body, Math.min(60000, Math.max(5000, backoff * 2)));
+    }
+    if (Object.keys(pending).length && !timer) schedule(solo ? 1000 : SAVE_EVERY);
   }
-  if (p.real_estate && typeof p.real_estate === 'object' && Array.isArray(p.real_estate.myProps)) {
-    const localAt = parseInt(localStorage.getItem(k('reSavedAt')) || '0') || 0;
-    if ((p.real_estate.savedAt || 0) >= localAt) {
-      localStorage.setItem(k('myProps'), JSON.stringify(p.real_estate.myProps));
-      localStorage.setItem(k('reTenants'), JSON.stringify(p.real_estate.reTenants || {}));
-      localStorage.setItem(k('reSavedAt'), String(p.real_estate.savedAt || 0));
+  function flush(opts) {
+    const keepalive = !!(opts && opts.keepalive);
+    clearTimeout(timer); timer = null;
+    if (busy) { if (!keepalive) { return busy.then(() => flush()); } return busy; }
+    if (!Object.keys(pending).length) return Promise.resolve();
+    busy = send(keepalive).catch(() => {}).finally(() => { busy = null; });
+    return busy;
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => { backoff = 0; if (Object.keys(pending).length) flush(); });
+    window.addEventListener('pagehide', () => flush({ keepalive: true }));
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush({ keepalive: true }); });
+  }
+  return {
+    // Start (or switch) the account this tab syncs. Columns left unsynced by an earlier visit are re-sent by the app.
+    begin(em) { if (em !== email) { pending = {}; clearTimeout(timer); timer = null; loadP = null; missing.clear(); solo = false; backoff = 0; } email = em || ''; },
+    end() { pending = {}; clearTimeout(timer); timer = null; loadP = null; email = ''; },
+    onAuthLost(fn) { handlers.authLost = typeof fn === 'function' ? fn : () => {}; },
+    isUnsynced(col) { return !!email && readUnsynced().has(col); },
+    save(cols) {
+      if (!email || !cols || typeof cols !== 'object') return;
+      const s = readUnsynced(); let added = false;
+      Object.keys(cols).forEach(c => { if (PROGRESS_COLS.includes(c) && !missing.has(c)) { pending[c] = cols[c]; if (!s.has(c)) { s.add(c); added = true; } } });
+      if (added) writeUnsynced(s);
+      if (!timer && !busy) schedule(backoff || SAVE_EVERY);
+    },
+    flush,
+    // One GET for the whole row, shared by every caller for 20 s (the app asks for several columns at mount).
+    // Resolves { ok, status, progress } and never rejects.
+    loadAll(fresh) {
+      if (!fresh && loadP && Date.now() - loadAt < 20000) return loadP;
+      const who = email; loadAt = Date.now();
+      loadP = apiCall('progress').then(r => {
+        if (r.status === 401 && who && who === email) handlers.authLost();
+        const p = r.status === 200 && r.data.progress && typeof r.data.progress === 'object' && !Array.isArray(r.data.progress) ? r.data.progress : null;
+        return { ok: r.status === 200, status: r.status, progress: p };
+      });
+      return loadP;
+    },
+    // One column (null if missing, unavailable or not loaded)
+    async col(name) { if (!email || missing.has(name)) return null; const r = await this.loadAll(); const v = r.progress ? r.progress[name] : null; return v === undefined ? null : v; },
+  };
+})();
+// "Find my home" privacy: a home the player looked up is never stored with its street address, ZIP, census tract
+// or exact coordinates (rounded to 0.01°, about 1 km). Applied when the home is created, before anything is saved,
+// and again to anything loaded from this device or the cloud (older versions saved the full address).
+const reRound2 = (n) => { const v = Number(n); return Number.isFinite(v) ? Math.round(v * 100) / 100 : null; };
+const reIsPrivateHome = (p) => !!(p && typeof p === 'object' && (p.isHome || p.ownerOccupied));
+const reScrubHome = (p) => {
+  if (!reIsPrivateHome(p)) return p;
+  const lookedUp = p.homeLookup || p.confidence !== undefined || p.explain !== undefined;   // came from "Find my home"
+  const out = { ...p, lat: reRound2(p.lat), lng: reRound2(p.lng) };
+  delete out.zip; delete out.geo;
+  if (lookedUp) { out.address = 'My home'; out.homeLookup = true; if (!/^home_/.test(String(out.id))) out.id = 'home_' + (Date.now().toString(36) + Math.random().toString(36).slice(2, 7)); }
+  return out;
+};
+// Scrub a { myProps, reTenants } pair; tenant records follow a home whose id had to change
+const reScrubRE = (myProps, reTenants) => {
+  const tenants = reTenants && typeof reTenants === 'object' && !Array.isArray(reTenants) ? { ...reTenants } : {};
+  const props = (Array.isArray(myProps) ? myProps : []).filter(p => p && typeof p === 'object' && !Array.isArray(p)).map(p => {
+    const s = reScrubHome(p);
+    if (s.id !== p.id && Object.prototype.hasOwnProperty.call(tenants, p.id)) { tenants[s.id] = tenants[p.id]; delete tenants[p.id]; }
+    return s;
+  });
+  return { myProps: props, reTenants: tenants };
+};
+// Small per-user game data that has no column of its own; it rides along in progress.economy.extras so that
+// signing out (which clears this device) does not lose it. Restored at sign-in only where this device has nothing.
+const EXTRA_KEYS = ['achievements', 'junior', 'pro', 'reLicense', 'reExamDone', 'reExamScore', 'wholesaled', 'lastRentCollect', 'phoneRead', 'phoneTexts', 'nwHist', 'dealCalc'];
+const collectExtras = (email) => {
+  const out = {};
+  EXTRA_KEYS.forEach(n => { const v = lsGet(n + '::' + email); if (v != null && v.length <= 32768) out[n] = v; });
+  return out;
+};
+const restoreExtras = (email, extras) => {
+  if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return;
+  EXTRA_KEYS.forEach(n => { const v = extras[n]; if (typeof v === 'string' && v.length <= 32768 && lsGet(n + '::' + email) == null) lsSet(n + '::' + email, v); });
+};
+// Write a freshly loaded cloud row into this device's cache (used at sign-in, when the device has just been
+// cleared). Everything is re-validated by the same loaders the app uses for localStorage (finNum/lsList/kqMerge…).
+const applyProgressToLocal = (email, p) => {
+  if (!p || typeof p !== 'object') return;
+  const k = (n) => n + '::' + email;
+  const obj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (Array.isArray(p.completed_lessons)) lsSet(k('completedLessons'), JSON.stringify(p.completed_lessons.filter(x => typeof x === 'number' || typeof x === 'string')));
+  if (obj(p.lesson_notes)) lsSet(k('lessonNotes'), JSON.stringify(p.lesson_notes));
+  if (obj(p.portfolio)) lsSet(k('portfolio'), JSON.stringify(p.portfolio));
+  if (p.sim_days != null) lsSet(k('simDays'), String(Math.floor(finNum(p.sim_days, 0, 36500, 0))));
+  if (p.sim_target != null) lsSet(k('simTarget'), String(Math.floor(finNum(p.sim_target, 0, 36500, 0))));
+  if (obj(p.money_quest)) {
+    const local = lsJSON(k('moneyQuest'), 'null');
+    lsSet(k('moneyQuest'), JSON.stringify(kqMerge(local, p.money_quest)));   // keep stars/stickers from both copies
+  }
+  if (obj(p.real_estate) && Array.isArray(p.real_estate.myProps)) {
+    const localAt = parseInt(lsGet(k('reSavedAt')) || '0') || 0, at = finNum(p.real_estate.savedAt, 0, Date.now(), 0);
+    if (at >= localAt) {
+      const re = reScrubRE(p.real_estate.myProps, p.real_estate.reTenants);
+      lsSet(k('myProps'), JSON.stringify(re.myProps));
+      lsSet(k('reTenants'), JSON.stringify(re.reTenants));
+      lsSet(k('reSavedAt'), String(at));
     }
   }
+  if (obj(p.economy)) restoreExtras(email, p.economy.extras);
 };
-// Money Quest cloud save (progress.money_quest jsonb). Higher score = further along; used to pick local vs cloud.
+// Money Quest save score: higher = further along; used to pick local vs cloud.
 const kqSaveScore = (s) => s && typeof s === 'object' ? (s.xp || 0) * 1000 + (s.plays || 0) : -1;
-let _kqCloudMissing = false;
-const dbSaveMoneyQuest = (email, st) => {
-  if (!db || _kqCloudMissing) return;
-  db.from('progress').update({ money_quest: st, updated_at: new Date().toISOString() }).eq('email', email).then(({ error }) => {
-    if (error && error.code === '42703') { _kqCloudMissing = true; console.warn('Money Quest cloud save is off: run supabase/add_money_quest_column.sql in Supabase to enable it.'); }
-  });
-};
-const dbLoadMoneyQuest = async (email) => {
-  if (!db) return null;
-  try { const { data, error } = await db.from('progress').select('money_quest').eq('email', email).single(); if (error) return null; return data && data.money_quest; }
-  catch { return null; }
-};
-// Real estate cloud save (progress.real_estate jsonb): { myProps, reTenants, savedAt }. Newer savedAt wins.
-let _reCloudMissing = false;
-const _reCloudWarn = () => { if (!_reCloudMissing) { _reCloudMissing = true; console.warn('Real estate cloud save is off: run supabase/add_real_estate_column.sql in Supabase to enable it.'); } };
-const dbSaveRealEstate = (email, st) => {
-  if (!db || _reCloudMissing) return;
-  db.from('progress').update({ real_estate: st, updated_at: new Date().toISOString() }).eq('email', email).then(({ error }) => {
-    if (error && error.code === '42703') _reCloudWarn();
-  });
-};
-const dbLoadRealEstate = async (email) => {
-  if (!db || _reCloudMissing) return null;
-  try {
-    const { data, error } = await db.from('progress').select('real_estate').eq('email', email).single();
-    if (error) { if (error.code === '42703') _reCloudWarn(); return null; }
-    return data && data.real_estate;
-  } catch { return null; }
-};
-// Money City economy save (progress.economy jsonb): { bank, loans, myBonds, savedAt }. Newer savedAt wins.
-let _econCloudMissing = false;
-const dbSaveEconomy = (email, st) => {
-  if (!db || _econCloudMissing) return;
-  db.from('progress').update({ economy: st, updated_at: new Date().toISOString() }).eq('email', email).then(({ error }) => {
-    if (error && error.code === '42703') { _econCloudMissing = true; console.warn('Economy cloud save is off: run supabase/add_economy_column.sql in Supabase to enable it.'); }
-  });
-};
-const dbLoadEconomy = async (email) => {
-  if (!db || _econCloudMissing) return null;
-  try {
-    const { data, error } = await db.from('progress').select('economy').eq('email', email).single();
-    if (error) { if (error.code === '42703') _econCloudMissing = true; return null; }
-    return data && data.economy;
-  } catch { return null; }
-};
-// Money City world save (progress.world jsonb): { v, scene, x, y, dir, visited, savedAt }. Newer savedAt wins.
-let _worldCloudMissing = false;
-const dbSaveWorld = (email, st) => {
-  if (!db || _worldCloudMissing) return;
-  db.from('progress').update({ world: st, updated_at: new Date().toISOString() }).eq('email', email).then(({ error }) => {
-    if (error && error.code === '42703') { _worldCloudMissing = true; console.warn('Money City world cloud save is off: run supabase/add_world_column.sql in Supabase to enable it.'); }
-  });
-};
-const dbLoadWorld = async (email) => {
-  if (!db || _worldCloudMissing) return null;
-  try {
-    const { data, error } = await db.from('progress').select('world').eq('email', email).single();
-    if (error) { if (error.code === '42703') _worldCloudMissing = true; return null; }
-    return data && data.world;
-  } catch { return null; }
-};
+// Column-specific helpers used by the components (same names as before, now backed by Cloud)
+const dbSaveMoneyQuest = (st) => Cloud.save({ money_quest: st });
+const dbLoadMoneyQuest = () => Cloud.col('money_quest');
+const dbSaveRealEstate = (st) => { const re = reScrubRE(st.myProps, st.reTenants); Cloud.save({ real_estate: { ...st, myProps: re.myProps, reTenants: re.reTenants } }); };
+const dbLoadRealEstate = () => Cloud.col('real_estate');
+const dbSaveEconomy = (email, st) => Cloud.save({ economy: { ...st, extras: collectExtras(email) } });
+const dbLoadEconomy = () => Cloud.col('economy');
+const dbSaveWorld = (st) => Cloud.save({ world: st });
+const dbLoadWorld = () => Cloud.col('world');
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Password hash — must stay identical to hashPw in netlify/functions/confirm-reset.js
-function hashPw(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
-  return 'h' + h.toString(36) + str.length;
-}
-
-// Access code validation — server-side only (netlify/functions/validate-code). The code-hash list used to be
-// copied here as a "drag-and-drop deploy" fallback, but anything in this page is public: the 32-bit hash is easy to
-// collide offline, so the copy let anyone mint a working code. If the function can't be reached we fail closed.
-const validateCode = async (code) => {
-  try {
-    const res = await fetch('/.netlify/functions/validate-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    });
-    if (res.ok) { const d = await res.json(); return { valid: d.valid === true, free: d.free === true }; }
-  } catch { /* fall through */ }
-  return { valid: false, free: false, unavailable: true };
-};
-// The tester account used to sign in against a password hash hard-coded here. That hash is public and trivially
-// collidable (32-bit), so it was a back door; the tester now signs in like everyone else (a Supabase account).
-const TESTER_EMAIL = 'tester@invested.test';
-const getUsedCodes = () => lsJSON('usedCodes', '[]');
-const isCodeUsedHere = (code) => getUsedCodes().includes(hashPw('code::' + code.trim().toUpperCase()));
-const burnCode = (code, email, name) => {
-const h = hashPw('code::' + code.trim().toUpperCase());
-localStorage.setItem('usedCodes', JSON.stringify([...getUsedCodes(), h]));
-const _cu = code.trim().toUpperCase(), _masked = _cu.length > 4 ? '••••' + _cu.slice(-4) : '••••';   // never keep a raw code in localStorage
-const al = lsJSON('adminCodeLog', '[]'); al.push({code:_masked, email, name, date:new Date().toISOString()}); localStorage.setItem('adminCodeLog', JSON.stringify(al));
-try {
-fetch('/', {
-method: 'POST',
-headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-body: new URLSearchParams({ 'form-name': 'code-used', code: code.trim().toUpperCase(), email: email, name: name }).toString()
-}).catch(() => {});
-} catch (err) {  }
-};
 const checkOwner = (setOwner) => {
 // Verify any stored admin session token against the server
 verifyAdminToken().then(ok => { if (ok) setOwner(true); }).catch(() => {});
 };
-const getUsers = () => { const v = lsJSON('investedUsers', '[]'); return Array.isArray(v) ? v : []; };
-const saveUsers = (u) => localStorage.setItem('investedUsers', JSON.stringify(u));
-// Remove the cached password hash for an account that now lives in Supabase (keeps localStorage free of credentials)
-const dropLocalPw = (email) => { try { const us = getUsers(); if (us.some(u => u.email === email && u.pw)) saveUsers(us.map(u => { if (u.email !== email) return u; const { pw, ...rest } = u; return rest; })); } catch {} };
-const getSession = () => lsJSON('investedSession', 'null');
-const setSession = (u) => localStorage.setItem('investedSession', JSON.stringify(u ? { name: u.name, email: u.email } : null));
 const openFeedback = () => {
 if (!FEEDBACK_FORM_URL || FEEDBACK_FORM_URL.indexOf('PASTE_') === 0) {
 alert('Feedback form not set up yet.\n\nApp owner: create a Google Form at forms.google.com, turn on email notifications, and paste the share link into FEEDBACK_FORM_URL near the top of this file.');
@@ -3118,7 +3196,8 @@ const verifyAdminToken = async () => {
     return ok;
   } catch { return false; }
 };
-const trackEvent = (event, data) => { try { const log = lsJSON('adminAnalytics', '[]'); log.push({event, data:data||{}, ts:new Date().toISOString()}); if(log.length>1000) log.splice(0,log.length-1000); localStorage.setItem('adminAnalytics', JSON.stringify(log)); } catch(err){} };
+// Local-only activity counters (this browser). Never records names, emails or addresses.
+const trackEvent = (event, data) => { try { const d = { ...(data && typeof data === 'object' ? data : {}) }; PII_FIELDS.forEach(f => delete d[f]); const log = lsJSON('adminAnalytics', '[]'); if (!Array.isArray(log)) throw 0; log.push({event, data:d, ts:new Date().toISOString()}); if(log.length>1000) log.splice(0,log.length-1000); localStorage.setItem('adminAnalytics', JSON.stringify(log)); } catch(err){} };
 /* ===== RATE LIMITER ===== */
 const RATE_LIMIT_MAX = 5;       // max failed attempts
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15-minute lockout
@@ -4350,7 +4429,7 @@ e('button', { type: 'button', className: 'btn btn-primary', style: { width: '100
 )
 );
 };
-const AuthScreen = ({ onAuth, onAdminAuth }) => {
+const AuthScreen = ({ onAuth, onAdminAuth, notice }) => {
 const [mode, setMode] = useState('signin');
 const [owner, setOwner] = useState(false);
 useEffect(() => { checkOwner(setOwner); }, []);
@@ -4361,7 +4440,11 @@ const [password, setPassword] = useState('');
 const [confirm, setConfirm] = useState('');
 const [accessCode, setAccessCode] = useState('');
 const [adminCode, setAdminCode] = useState('');
-const [error, setError] = useState('');
+// Sign-up age screen + consent (COPPA). Only the age band is ever sent; under 13 stops here.
+const [age, setAge] = useState('');
+const [agree, setAgree] = useState(false);
+const [ageBlocked, setAgeBlocked] = useState(() => { try { return sessionStorage.getItem('mqAgeBlock') === '1'; } catch { return false; } });
+const [error, setError] = useState(notice || '');
 const [loading, setLoading] = useState(false);
 // Forgot-password state (3-step: email → verify code → new password)
 const [forgotEmail,    setForgotEmail]    = useState('');
@@ -4450,72 +4533,74 @@ const submit = async (ev) => {
 ev.preventDefault();
 // The forgot-password steps have their own buttons; Enter there must not submit the hidden sign-in form
 if (mode === 'forgot' || mode === 'admin' || mode === 'practice') return;
+if (loading) return;
 setError('');
+const em = email.trim().toLowerCase();
+if (mode === 'signup') {
+  // Neutral age screen first. Under 13: no account, nothing is sent or stored except a tab-only flag so the age
+  // can't simply be changed and re-submitted (FTC guidance for age screens).
+  if (ageBlocked) return;
+  if (!age) { setError('Please tell us how old you are.'); return; }
+  if (age === 'u13') { setAgeBlocked(true); try { sessionStorage.setItem('mqAgeBlock', '1'); } catch {} return; }
+  if (!name.trim()) { setError('Please enter your first name or a nickname.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError('Please enter a valid email address.'); return; }
+  if (password.trim().length < 8) { setError('Password must be at least 8 characters.'); return; }
+  if (password !== confirm) { setError('Passwords do not match.'); return; }
+  if (!accessCode.trim()) { setError('Please enter your access code.'); return; }
+  if (!agree) { setError('Please agree to the Terms of Use and Privacy Policy.'); return; }
+} else {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError('Please enter a valid email address.'); return; }
+  if (!password) { setError('Please enter your password.'); return; }
+}
 setLoading(true);
 try {
-const em = email.trim().toLowerCase();
-if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError('Please enter a valid email address.'); return; }
-if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
-// Rate limit by email
-const rl = checkRateLimit('login::' + em);
-if (rl.blocked) { setError('Too many failed attempts. Try again in ' + fmtLockout(rl.until) + '.'); return; }
-const users = getUsers();
-if (mode === 'signup') {
-if (!name.trim()) { setError('Please enter your name.'); return; }
-if (password !== confirm) { setError('Passwords do not match.'); return; }
-const codeCheck = await validateCode(accessCode);
-if (codeCheck.unavailable) { setError("We couldn't check your access code right now. Please check your connection and try again."); return; }
-if (!codeCheck.valid) { recordFailedAttempt('login::' + em); setError('Invalid access code. Purchase a code to create an account.'); return; }
-if (isCodeUsedHere(accessCode)) { setError('This access code has already been used. Each code creates one account.'); return; }
-// Check both local and Supabase for existing account
-const existsLocal = users.some(u => u.email === em);
-const existsDB = await dbGetUser(em);
-if (existsLocal || existsDB) { setError('An account with this email already exists. Sign in instead.'); return; }
-const user = { name: name.trim(), email: em, pw: hashPw(password.trim()), created: new Date().toISOString(), freeAccess: codeCheck.free };
-saveUsers([...users, user]);
-burnCode(accessCode, em, name.trim());
-setSession(user);
-dbCreateUser(user).then(ok => { if (ok) dropLocalPw(em); }); // save to Supabase (non-blocking); once it's there, stop keeping a password hash in localStorage
-trackEvent('signup', { name: user.name, email: em });
-onAuth({ name: user.name, email: user.email, isNew: true });
-} else {
-// Try Supabase first, fall back to localStorage
-let verified = false;
-const dbUser = await dbGetUser(em);
-if (dbUser) {
-if (dbUser.pw_hash !== hashPw(password.trim())) { recordFailedAttempt('login::' + em); setError('Incorrect email or password.'); return; }
-// Sync Supabase user into local storage
-// (no password hash in the local copy: Supabase is the source of truth for this account)
-const localUser = { name: dbUser.name, email: dbUser.email, freeAccess: dbUser.free_access };
-const existing = users.find(u => u.email === em);
-if (!existing) saveUsers([...users, localUser]); else dropLocalPw(em);
-setSession(localUser);
-// Load and apply progress from Supabase
-const progress = await dbLoadProgress(em);
-applyProgressToLocal(em, progress);
-verified = true;
-clearRateLimit('login::' + em);
-trackEvent('signin', { email: em });
-onAuth({ name: dbUser.name, email: dbUser.email });
-}
-if (!verified) {
-// Fall back to local storage
-const user = users.find(u => u.email === em);
-if (!user || user.pw !== hashPw(password.trim())) { recordFailedAttempt('login::' + em); setError('Incorrect email or password.'); return; }
-clearRateLimit('login::' + em);
-setSession(user);
-trackEvent('signin', { email: em });
-onAuth({ name: user.name, email: user.email });
-}
-}
-} catch(err) {
-setError('Something went wrong. Please try again.');
-console.error('Login error:', err);
+  if (mode === 'signup') {
+    // ageBand / consentVersion are sent for the server to record once it stores them (never the exact age)
+    const r = await apiCall('auth-signup', { method: 'POST', auth: false, body: {
+      name: name.trim(), email: em, password, code: accessCode.trim(), ageBand: age === '18+' ? '18+' : '13-17', consentVersion: '2026-11-02' } });
+    const u = r.status === 201 || r.status === 200 ? userFromApi(r.data.user) : null;
+    if (u && TOKEN_RE.test(r.data.token || '')) {
+      clearLocalUserData();   // nothing from an earlier account on this device carries over
+      setToken(r.data.token); setSession(u);
+      trackEvent('signup', {});
+      onAuth({ ...u, isNew: true });
+      return;
+    }
+    if (r.status === 409 && r.data.reason === 'code_used') setError('This access code has already been used. Each code creates one account.');
+    else if (r.status === 409) setError('An account with this email already exists. Sign in instead.');
+    else if (r.status === 403) setError('That access code is not valid. Check it for typos, or purchase a code to create an account.');
+    else setError(apiErrorText(r, "We couldn't create your account. Please check your details and try again."));
+    return;
+  }
+  const r = await apiCall('auth-login', { method: 'POST', auth: false, body: { email: em, password } });
+  const u = r.status === 200 ? userFromApi(r.data.user) : null;
+  if (!u || !TOKEN_RE.test(r.data.token || '')) {
+    setError(r.status === 401 ? 'Incorrect email or password.' : r.status === 200 ? MSG_DOWN : apiErrorText(r, 'Sign-in failed. Please try again.'));
+    return;
+  }
+  // Load the cloud copy before the app opens. If that fails, stop: opening with an empty device would
+  // overwrite the saved progress with a fresh start.
+  clearLocalUserData();
+  setToken(r.data.token);
+  Cloud.begin(u.email);
+  const pr = await Cloud.loadAll(true);
+  if (!pr.ok) {
+    Cloud.end(); setToken(null);
+    setError(pr.status === 0 ? MSG_OFFLINE : "You're signed in, but we couldn't load your saved progress. Please try again in a minute.");
+    return;
+  }
+  applyProgressToLocal(u.email, pr.progress);
+  setSession(u);
+  trackEvent('signin', {});
+  onAuth(u);
+} catch (err) {
+  setError('Something went wrong. Please try again.');
+  console.error('Sign-in error:', err && err.message);
 } finally {
-setLoading(false);
+  setLoading(false);
 }
 };
-;
+const signupGate = mode === 'signup' && (ageBlocked || !age);   // age first: nothing else is asked until it is answered
 return e('div', { className: 'auth-wrap' },
 e('form', { className: 'auth-card', onSubmit: submit },
 e('div', { style: { display:'flex', flexDirection:'column', alignItems:'center', marginBottom:24, gap:8 } },
@@ -4540,7 +4625,7 @@ e('label', { className:'field-label' }, 'Admin Email'),
 e('input', { className:'input-field', type:'email', value:email, onChange:(ev)=>setEmail(ev.target.value), placeholder:'Admin email', autoComplete:'email' }),
 e('label', { className:'field-label' }, 'Password'),
 e('input', { className:'input-field', type:'password', value:password, onChange:(ev)=>setPassword(ev.target.value), placeholder:'Admin password', autoComplete:'current-password' }),
-e('div', { style:{textAlign:'center', color:'var(--text-secondary)', fontSize:12, margin:'2px 0 8px'} }, '— or enter admin code —'),
+e('div', { style:{textAlign:'center', color:'var(--text-secondary)', fontSize:12, margin:'2px 0 8px'} }, 'All three are required.'),
 e('label', { className:'field-label' }, 'Admin Access Code'),
 e('input', { className:'input-field', value:adminCode, onChange:(ev)=>setAdminCode(ev.target.value), placeholder:'ADMIN-XXXX-XXXX', style:{textTransform:'uppercase'} }),
 e('button', { type:'button', className:'btn btn-primary', style:{width:'100%', padding:'13px', marginTop:4, background:'linear-gradient(135deg,#7c3aed,#4c1d95)'}, onClick:handleAdminLogin }, '🔐 Access Admin Panel')
@@ -4555,17 +4640,30 @@ e('li', {}, 'Full access to lessons, dictionary, and market data')
 e('button', { type: 'button', onClick: launchPractice, className: 'btn btn-primary', style: { width: '100%', padding: '13px' } }, 'Launch Practice Mode'),
 e('div', { className: 'auth-foot' }, 'Great for demos and classrooms — resets every time.')
 ) : e('div', {},
-mode === 'signup' && e('div', {},
-e('label', { className: 'field-label' }, 'Full Name'),
-e('input', { className: 'input-field', value: name, onChange: (ev) => setName(ev.target.value), placeholder: 'Jane Smith', autoComplete: 'name' })
-),
-mode !== 'forgot' && e('div', {},   // sign-in fields are hidden on the forgot-password screen
+mode === 'signup' && (ageBlocked
+  ? e('div', { role: 'status', style: { background: 'rgba(255,200,61,0.10)', border: '1px solid rgba(255,200,61,0.45)', borderRadius: 10, padding: '16px', fontSize: 14, lineHeight: 1.6, marginBottom: 12 } },
+      e('div', { style: { fontSize: 30, textAlign: 'center', marginBottom: 6 } }, '🐷'),
+      e('div', { style: { fontWeight: 800, marginBottom: 6 } }, 'Kids under 13 need a parent or teacher to set up Money Quest.'),
+      e('div', { style: { color: 'var(--text-secondary)' } }, 'Ask a grown-up to create the account for you. ',
+        e('a', { href: 'privacy.html#children', target: '_blank', rel: 'noopener', style: { color: '#FFC83D' } }, 'Information for parents'), '.'))
+  : e('div', {},
+      e('label', { className: 'field-label', htmlFor: 'mq-age' }, 'How old are you?'),
+      e('select', { id: 'mq-age', className: 'input-field', value: age, onChange: (ev) => { const v = ev.target.value; setError('');
+          if (v === 'u13') { setAge(''); setAgeBlocked(true); try { sessionStorage.setItem('mqAgeBlock', '1'); } catch {} } else setAge(v); } },
+        e('option', { value: '' }, 'Choose your age'),
+        e('option', { value: 'u13' }, '12 or younger'),
+        ...['13', '14', '15', '16', '17'].map(a => e('option', { key: a, value: a }, a)),
+        e('option', { value: '18+' }, '18 or older')),
+      !!age && e('label', { className: 'field-label' }, 'First name or nickname'),
+      !!age && e('input', { className: 'input-field', value: name, maxLength: 40, onChange: (ev) => setName(ev.target.value), placeholder: 'e.g. Sam', autoComplete: 'nickname' })
+    )),
+!signupGate && mode !== 'forgot' && e('div', {},   // sign-in fields are hidden on the forgot-password screen
 e('label', { className: 'field-label' }, 'Email'),
 e('input', { className: 'input-field', type: 'email', value: email, onChange: (ev) => setEmail(ev.target.value), placeholder: 'you@school.org', autoComplete: 'email' }),
 e('label', { className: 'field-label' }, 'Password'),
-e('input', { className: 'input-field', type: 'password', value: password, onChange: (ev) => setPassword(ev.target.value), placeholder: 'At least 6 characters', autoComplete: mode === 'signup' ? 'new-password' : 'current-password' })
+e('input', { className: 'input-field', type: 'password', value: password, onChange: (ev) => setPassword(ev.target.value), placeholder: mode === 'signup' ? 'At least 8 characters' : 'Your password', autoComplete: mode === 'signup' ? 'new-password' : 'current-password' })
 ),
-mode === 'signup' && e('div', {},
+mode === 'signup' && !signupGate && e('div', {},
 e('label', { className: 'field-label' }, 'Confirm Password'),
 e('input', { className: 'input-field', type: 'password', value: confirm, onChange: (ev) => setConfirm(ev.target.value), placeholder: 'Re-enter password' }),
 e('label', { className: 'field-label' }, 'Access Code'),
@@ -4579,7 +4677,13 @@ e('div', { style: { background: 'rgba(67,97,238,0.08)', border: '1px solid rgba(
     style: { display: 'block', background: '#635bff', color: '#fff', textAlign: 'center', padding: '10px', borderRadius: '8px', fontWeight: 700, fontSize: '14px', textDecoration: 'none', letterSpacing: '0.2px' }
   }, '💳 Subscribe to Get Access — $10/mo'),
   e('div', { style: { fontSize: '10px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '6px' } }, "You'll receive your access code after subscribing")
-)
+),
+e('label', { style: { display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 12px', lineHeight: 1.5, cursor: 'pointer' } },
+  e('input', { type: 'checkbox', checked: agree, onChange: (ev) => setAgree(ev.target.checked), style: { marginTop: 3, flex: 'none' } }),
+  e('span', {}, age === '18+' ? 'I agree to the ' : 'I have read the ',
+    e('a', { href: 'terms.html', target: '_blank', rel: 'noopener', style: { color: '#93a5ff' } }, 'Terms of Use'), ' and ',
+    e('a', { href: 'privacy.html', target: '_blank', rel: 'noopener', style: { color: '#93a5ff' } }, 'Privacy Policy'),
+    age === '18+' ? '.' : ' with my parent or guardian, and we agree to them.'))
 ),
 mode === 'forgot'
   ? (forgotDone
@@ -4666,7 +4770,8 @@ mode === 'forgot'
           )
         )
     )
-  : e('button', { type: 'submit', className: 'btn btn-primary', style: { width: '100%', marginTop: '8px', padding: '13px' }, disabled: loading }, loading ? '⏳ Signing in…' : mode === 'signup' ? 'Create Account' : 'Sign In'),
+  : signupGate ? null
+  : e('button', { type: 'submit', className: 'btn btn-primary', style: { width: '100%', marginTop: '8px', padding: '13px' }, disabled: loading }, loading ? (mode === 'signup' ? '⏳ Creating account…' : '⏳ Signing in…') : mode === 'signup' ? 'Create Account' : 'Sign In'),
 mode === 'signin' && e('div', { style: { textAlign: 'center', marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 } },
   e('a', {
     href: 'https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00',
@@ -4676,7 +4781,9 @@ mode === 'signin' && e('div', { style: { textAlign: 'center', marginTop: '12px',
   }, "Don't have an account? Subscribe → $10/mo"),
   e('button', { type: 'button', onClick: () => { setMode('forgot'); setError(''); setForgotStep(1); setForgotEmail(''); setForgotCode(''); setForgotPw(''); setForgotPw2(''); setForgotDone(false); }, style: { background: 'none', border: 'none', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: 600, padding: 0 } }, "Forgot password?")
 ),
-e('div', { className: 'auth-foot' }, 'Accounts and progress are securely synced to the cloud. Access your progress from any device.'),
+e('div', { className: 'auth-foot' }, 'Your progress syncs to your account so you can use any device. By using Money Quest you agree to our ',
+  e('a', { href: 'terms.html', target: '_blank', rel: 'noopener', style: { color: 'inherit', textDecoration: 'underline' } }, 'Terms'), ' and ',
+  e('a', { href: 'privacy.html', target: '_blank', rel: 'noopener', style: { color: 'inherit', textDecoration: 'underline' } }, 'Privacy Policy'), '.'),
 e('div', { style: { textAlign:'center', marginTop:16 } },
   e('a', { href: 'index.html', style: { fontSize:12, color:'var(--text-secondary)', textDecoration:'none', fontWeight:600 } }, '← Back to home')
 )
@@ -7300,8 +7407,8 @@ const [cryptoBuyQty, setCryptoBuyQty] = useState('');
 // which used to let the same deal be assigned again and again for a fresh fee.
 const [wholesaled, setWholesaled] = useState(() => { const v = lsJSON(k('wholesaled'), '[]'); return Array.isArray(v) ? v : []; });
 const [mlsProps, setMlsProps] = useState(() => generateMLS().filter(p => !wholesaled.includes(p.id)));
-const [myProps, setMyProps] = useState(() => lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0));
-const [reTenants, setReTenants] = useState(() => { const v = lsJSON(k('reTenants'), '{}'); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; });
+const [myProps, setMyProps] = useState(() => reScrubRE(lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0), lsJSON(k('reTenants'), '{}')).myProps);
+const [reTenants, setReTenants] = useState(() => reScrubRE(lsList(k('myProps'), p => finNum(p.price, 0, 1e10, -1) >= 0), lsJSON(k('reTenants'), '{}')).reTenants);
 const [hasReLicense, setHasReLicense] = useState(() => lsJSON(k('reLicense'), 'false'));
 const [reTab, setReTab] = useState('mls');
 const [mlsSearch, setMlsSearch] = useState('');
@@ -7323,30 +7430,33 @@ const [myBonds, setMyBonds] = useState(() => lsList(k('myBonds'), b => finNum(b.
 const [loans, setLoans] = useState(() => lsList(k('loans'), l => finNum(l.balance, 0, 1e10, -1) >= 0 && finNum(l.rate, 0, 100, -1) >= 0));
 // FirstCity Bank: savings account + credit file (payment history). Math lives in MQ.Bank.
 const bankDefault = () => ({ savings: { balance: 0, earned: 0, lastAccrue: Date.now() }, credit: { history: [], firstAt: null, inquiries: [] }, notices: [] });
-const [bank, setBank] = useState(() => { const b = lsJSON(k('bank'), 'null'), d = bankDefault();
+const sanBank = (b) => { const d = bankDefault();
   if (!(b && typeof b.savings === 'object' && b.savings && typeof b.credit === 'object' && b.credit)) return d;
   const sv = b.savings, cr = b.credit;   // bad numbers/lists in a save reset to safe values instead of NaN-ing the bank
   return { ...d, ...b, savings: { ...sv, balance: Math.round(finNum(sv.balance, 0, 1e12, 0) * 100) / 100, earned: finNum(sv.earned, -1e12, 1e12, 0), lastAccrue: finNum(sv.lastAccrue, 0, 1e15, Date.now()) || Date.now() },
     credit: { ...cr, history: Array.isArray(cr.history) ? cr.history.filter(h => h && typeof h === 'object') : [], inquiries: Array.isArray(cr.inquiries) ? cr.inquiries.filter(Number.isFinite) : [], firstAt: Number.isFinite(cr.firstAt) ? cr.firstAt : null },
-    notices: Array.isArray(b.notices) ? b.notices : [] }; });
+    notices: Array.isArray(b.notices) ? b.notices : [] }; };
+const [bank, setBank] = useState(() => sanBank(lsJSON(k('bank'), 'null')));
 const [bankTab, setBankTab] = useState('accounts');
 const [bankAmt, setBankAmt] = useState('');
 const [loanApp, setLoanApp] = useState(null);
 // Personal economy (Phase 3): job + paychecks, where you live, bills, monthly statements, money ledger. Math in MQ.Economy/MQ.Payroll.
 const econDefault = () => ({ job: null, exp: 0, housing: 'family', wants: {}, owed: 0, missedStreak: 0, deposit: 0, lastMonth: Date.now(), months: [], ledger: [], city: { taxRate: 1.0, hoaDues: 45, club: { picks: [] }, attended: {} } });
-const [econ, setEcon] = useState(() => { const v = lsJSON(k('econ'), 'null'), d = econDefault(); if (!(v && typeof v === 'object' && v.housing)) return d;
+const sanEcon = (v) => { const d = econDefault(); if (!(v && typeof v === 'object' && v.housing)) return d;
   const obj = (x, f) => x && typeof x === 'object' && !Array.isArray(x) ? x : f;
   return { ...d, ...v, ledger: Array.isArray(v.ledger) ? v.ledger.filter(x => x && Number.isFinite(x.amt)) : [], months: Array.isArray(v.months) ? v.months : [], wants: obj(v.wants, {}), city: obj(v.city, d.city),
-    deposit: finNum(v.deposit, 0, 1e7, 0), owed: finNum(v.owed, 0, 1e9, 0), exp: finNum(v.exp, 0, 1e5, 0), lastMonth: finNum(v.lastMonth, 0, 1e15, Date.now()) || Date.now() }; });
+    deposit: finNum(v.deposit, 0, 1e7, 0), owed: finNum(v.owed, 0, 1e9, 0), exp: finNum(v.exp, 0, 1e5, 0), lastMonth: finNum(v.lastMonth, 0, 1e15, Date.now()) || Date.now() }; };
+const [econ, setEcon] = useState(() => sanEcon(lsJSON(k('econ'), 'null')));
 const [finTab, setFinTab] = useState('overview');
 const [jobApp, setJobApp] = useState(null);   // job offer being accepted: { id, sig }
 const [houseView, setHouseView] = useState(null);
 // Money City Exchange (Phase 4): simulated companies + your positions (market.pos = { TICKER: { shares, cost } })
-const [market, setMarket] = useState(() => { const v = lsJSON(k('market'), 'null');
-  if (!(v && Array.isArray(v.companies) && v.companies.length === MQ.Market.COMPANIES.length && v.companies.every(c => c && Number.isFinite(c.price) && c.price > 0 && Array.isArray(c.hist)) && v.macro && typeof v.macro === 'object')) return { ...MQ.Market.init(Date.now()), pos: {} };
+const sanMarket = (v) => {   // null = not a usable save
+  if (!(v && Array.isArray(v.companies) && v.companies.length === MQ.Market.COMPANIES.length && v.companies.every(c => c && Number.isFinite(c.price) && c.price > 0 && Array.isArray(c.hist)) && v.macro && typeof v.macro === 'object')) return null;
   const pos = {};   // positions: whole shares > 0 with a finite cost basis, only for listed tickers
   Object.entries(v.pos && typeof v.pos === 'object' ? v.pos : {}).forEach(([t, p]) => { if (p && v.companies.some(c => c.t === t) && Number.isInteger(p.shares) && p.shares > 0 && Number.isFinite(p.cost)) pos[t] = { ...p, cost: Math.max(0, p.cost) }; });
-  return { ...v, pos }; });
+  return { ...v, pos }; };
+const [market, setMarket] = useState(() => sanMarket(lsJSON(k('market'), 'null')) || { ...MQ.Market.init(Date.now()), pos: {} });
 const [mcxView, setMcxView] = useState(null);   // ticker being viewed, or null for the market list
 const [mcxQty, setMcxQty] = useState('');
 MQ.Bank.setFed(market.macro.rate);   // bank savings/loan rates and mortgages follow the Money City Fed   // world house being viewed: building id
@@ -7438,11 +7548,19 @@ const setMainTab = (tab) => {
   _setMainTab(tab);
   if (tab==='simulator') localStorage.setItem(k('dailyExplored_'+todayKey),'true');
 };
-useEffect(() => { localStorage.setItem(k('lessonNotes'), JSON.stringify(lessonNotes)); dbSaveProgress(user.email, { lesson_notes: lessonNotes }); }, [lessonNotes]);
-useEffect(() => { localStorage.setItem(k('completedLessons'), JSON.stringify(completedLessons)); dbSaveProgress(user.email, { completed_lessons: completedLessons }); }, [completedLessons]);
-useEffect(() => { localStorage.setItem(k('portfolio'), JSON.stringify(portfolio)); dbSaveProgress(user.email, { portfolio: portfolio }); }, [portfolio]);
-useEffect(() => { localStorage.setItem(k('simDays'), String(daysElapsed)); dbSaveProgress(user.email, { sim_days: daysElapsed }); }, [daysElapsed]);
-useEffect(() => { localStorage.setItem(k('simTarget'), String(simTarget)); dbSaveProgress(user.email, { sim_target: simTarget }); }, [simTarget]);
+// Cloud saves (batched by Cloud). The first run of each effect is hydration from this device, not a change, so it
+// is only sent if an earlier visit left that column unsynced (e.g. the tab closed while offline).
+const cloudHydrated = React.useRef({});
+const saveCol = (col, val) => {
+  if (user.practice) return;
+  if (!cloudHydrated.current[col]) { cloudHydrated.current[col] = true; if (!Cloud.isUnsynced(col)) return; }
+  Cloud.save({ [col]: val });
+};
+useEffect(() => { lsSet(k('lessonNotes'), JSON.stringify(lessonNotes)); saveCol('lesson_notes', lessonNotes); }, [lessonNotes]);
+useEffect(() => { lsSet(k('completedLessons'), JSON.stringify(completedLessons)); saveCol('completed_lessons', completedLessons); }, [completedLessons]);
+useEffect(() => { lsSet(k('portfolio'), JSON.stringify(portfolio)); saveCol('portfolio', portfolio); }, [portfolio]);
+useEffect(() => { lsSet(k('simDays'), String(daysElapsed)); saveCol('sim_days', daysElapsed); }, [daysElapsed]);
+useEffect(() => { lsSet(k('simTarget'), String(simTarget)); saveCol('sim_target', simTarget); }, [simTarget]);
 useEffect(() => {
 if (!simPlaying) return;
 const STEP = 30;
@@ -7490,31 +7608,35 @@ const handleBuyCrypto = () => {
 const reSkipStamp = React.useRef(true);   // first run = hydration from localStorage, not a user change
 const reSaveTimer = React.useRef(null);
 useEffect(() => {
-  localStorage.setItem(k('myProps'), JSON.stringify(myProps));
-  localStorage.setItem(k('reTenants'), JSON.stringify(reTenants));
+  const re = reScrubRE(myProps, reTenants);   // a home's street address / exact location never reaches storage
+  lsSet(k('myProps'), JSON.stringify(re.myProps));
+  lsSet(k('reTenants'), JSON.stringify(re.reTenants));
   if (reSkipStamp.current) { reSkipStamp.current = false; return; }
   const savedAt = Date.now();
-  localStorage.setItem(k('reSavedAt'), String(savedAt));
+  lsSet(k('reSavedAt'), String(savedAt));
   if (user.practice) return;
   clearTimeout(reSaveTimer.current);
-  reSaveTimer.current = setTimeout(() => dbSaveRealEstate(user.email, { myProps, reTenants, savedAt }), 1500);
+  reSaveTimer.current = setTimeout(() => dbSaveRealEstate({ myProps: re.myProps, reTenants: re.reTenants, savedAt }), 1500);
 }, [myProps, reTenants]);
+useEffect(() => () => clearTimeout(reSaveTimer.current), []);
 useEffect(() => {
   if (user.practice) return;
   let alive = true;
-  dbLoadRealEstate(user.email).then((cloud) => {
+  dbLoadRealEstate().then((cloud) => {
     if (!alive) return;
-    const localAt = parseInt(localStorage.getItem(k('reSavedAt')) || '0') || 0;
-    if (cloud && typeof cloud === 'object' && Array.isArray(cloud.myProps) && (cloud.savedAt || 0) > localAt) {
+    const localAt = parseInt(lsGet(k('reSavedAt')) || '0') || 0;
+    const cloudAt = cloud && typeof cloud === 'object' ? finNum(cloud.savedAt, 0, Date.now(), 0) : 0;
+    if (cloud && typeof cloud === 'object' && Array.isArray(cloud.myProps) && cloudAt > localAt) {
+      const re = reScrubRE(cloud.myProps.filter(p => finNum(p && p.price, 0, 1e10, -1) >= 0), cloud.reTenants);
       reSkipStamp.current = true;
-      localStorage.setItem(k('reSavedAt'), String(cloud.savedAt || 0));
-      setMyProps(cloud.myProps.filter(p => p && typeof p === 'object' && !Array.isArray(p)));
-      setReTenants(cloud.reTenants && typeof cloud.reTenants === 'object' ? cloud.reTenants : {});
-    } else if (localAt > 0 && (!cloud || (cloud.savedAt || 0) < localAt)) {
-      dbSaveRealEstate(user.email, { myProps: lsJSON(k('myProps'), '[]'), reTenants: lsJSON(k('reTenants'), '{}'), savedAt: localAt });
+      lsSet(k('reSavedAt'), String(cloudAt));
+      setMyProps(re.myProps);
+      setReTenants(re.reTenants);
+    } else if (localAt > 0 && (!cloud || cloudAt < localAt)) {
+      dbSaveRealEstate({ myProps: lsJSON(k('myProps'), '[]'), reTenants: lsJSON(k('reTenants'), '{}'), savedAt: localAt });
     }
   });
-  return () => { alive = false; };   // a pending debounced save still fires after sign-out
+  return () => { alive = false; };
 }, []);
 useEffect(() => { localStorage.setItem(k('reLicense'), JSON.stringify(hasReLicense)); }, [hasReLicense]);
 useEffect(() => { const iv = setInterval(() => setRentNow(Date.now()), 10000); return () => clearInterval(iv); }, []);
@@ -7532,20 +7654,25 @@ useEffect(() => {
   clearTimeout(econTimer.current);
   econTimer.current = setTimeout(() => dbSaveEconomy(user.email, { bank, loans, myBonds, econ, market, savedAt }), 1500);
 }, [bank, loans, myBonds, econ, market]);
+useEffect(() => () => clearTimeout(econTimer.current), []);
 useEffect(() => {
   if (user.practice) return;
   let alive = true;
-  dbLoadEconomy(user.email).then(cloud => {
-    if (!alive || !cloud || typeof cloud !== 'object') return;
-    const localAt = parseInt(localStorage.getItem(k('econSavedAt')) || '0') || 0;
-    if ((cloud.savedAt || 0) > localAt) {
+  dbLoadEconomy().then(cloud => {
+    if (!alive) return;
+    const localAt = parseInt(lsGet(k('econSavedAt')) || '0') || 0;
+    const cloudAt = cloud && typeof cloud === 'object' && !Array.isArray(cloud) ? finNum(cloud.savedAt, 0, Date.now(), 0) : 0;
+    if (cloudAt > localAt) {
+      // same validation as the localStorage loaders above (a cloud copy can be stale or hand-edited too)
       econSkip.current = true;
-      if (cloud.bank && cloud.bank.savings) setBank({ ...bankDefault(), ...cloud.bank });
-      if (Array.isArray(cloud.loans)) setLoans(cloud.loans);
-      if (Array.isArray(cloud.myBonds)) setMyBonds(cloud.myBonds);
-      if (cloud.econ && cloud.econ.housing) setEcon({ ...econDefault(), ...cloud.econ });
-      if (cloud.market && cloud.market.companies && cloud.market.companies.length === MQ.Market.COMPANIES.length) setMarket(cloud.market);
-      localStorage.setItem(k('econSavedAt'), String(cloud.savedAt));
+      if (cloud.bank && cloud.bank.savings) setBank(sanBank(cloud.bank));
+      if (Array.isArray(cloud.loans)) setLoans(cloud.loans.filter(l => l && typeof l === 'object' && !Array.isArray(l) && finNum(l.balance, 0, 1e10, -1) >= 0 && finNum(l.rate, 0, 100, -1) >= 0));
+      if (Array.isArray(cloud.myBonds)) setMyBonds(cloud.myBonds.filter(b => b && typeof b === 'object' && !Array.isArray(b) && finNum(b.faceValue, 0, 1e10, -1) >= 0 && finNum(b.yield, 0, 100, -1) >= 0));
+      if (cloud.econ && cloud.econ.housing) setEcon(sanEcon(cloud.econ));
+      const m = sanMarket(cloud.market); if (m) setMarket(m);
+      lsSet(k('econSavedAt'), String(cloudAt));
+    } else if (localAt > 0 && cloudAt < localAt) {
+      dbSaveEconomy(user.email, { bank: lsJSON(k('bank'), 'null'), loans: lsJSON(k('loans'), '[]'), myBonds: lsJSON(k('myBonds'), '[]'), econ: lsJSON(k('econ'), 'null'), market: lsJSON(k('market'), 'null'), savedAt: localAt });
     }
   });
   return () => { alive = false; };
@@ -7560,7 +7687,7 @@ const buyProperty = (prop) => {
   setMyProps(prev => [...prev, {...prop, purchasePrice:prop.price, purchaseDate:new Date().toLocaleDateString(), boughtAt:Date.now(), equity:dp, mortgage:prop.price-dp, loanRate: +(RE_BASE_RATE + 0.75 + ctier.mortgageAdj).toFixed(3), status:'vacant', tenant:null, rentSet:prop.estimatedRent, flipBudget:0, flipStarted:null}]);
   setPortfolio(prev => ({...prev, cash:parseFloat((prev.cash-total).toFixed(2))}));
   setMlsProps(prev => prev.filter(p => p.id !== prop.id));
-  trackEvent('buy_property', {address:prop.address, price:prop.price});
+  trackEvent('buy_property', {price:prop.price});
   return true;
 };
 const sellPropertyFn = (propId) => {
@@ -10250,14 +10377,14 @@ const HomeTab = () => {
 return e('div', { style: { background: 'linear-gradient(135deg, var(--dark-bg) 0%, #141829 100%)', minHeight: '100vh' } },
 e(KidQuest, {
   onTrack: setKqTrack, makeQuiz: generateQuiz, storeKey: k('moneyQuest'),
-  cloudSave: user.practice ? null : (st) => dbSaveMoneyQuest(user.email, st),
-  cloudLoad: user.practice ? null : () => dbLoadMoneyQuest(user.email), playerName: (user.name || '').split(' ')[0], tab: mainTab, setTab: setMainTab, completedLessons,
+  cloudSave: user.practice ? null : dbSaveMoneyQuest,
+  cloudLoad: user.practice ? null : dbLoadMoneyQuest, playerName: (user.name || '').split(' ')[0], tab: mainTab, setTab: setMainTab, completedLessons,
   onKidFirstComplete: () => { setPortfolio(p => ({ ...p, cash: p.cash + KQ_SIM_REWARD })); logMoney('reward', 'Lesson reward', KQ_SIM_REWARD); },
   onProComplete: (id) => { if (!completedLessons.includes(id)) { setCompletedLessons(prev => prev.includes(id) ? prev : [...prev, id]); setPortfolio(p => ({ ...p, cash: p.cash + 1000 })); logMoney('reward', 'Lesson reward', 1000); } },
   launchPro: mainTab === 'quest' ? selectedLesson : null, onLaunched: () => setSelectedLesson(null),
   worldMode: cityView === 'world', onSignOut, onSimpleMode: () => { setWorldPanel(null); setCityView('classic'); _setMainTab('quest'); },
   worldView: cityView === 'world' ? e(CityWorld, { full: true, storeKey: k('mqWorld'), track: kqTrack, ticker: worldTicker(), cash: portfolio.cash, netWorth: calcNetWorth().net,
-    cloudSave: user.practice ? null : (st) => dbSaveWorld(user.email, st), cloudLoad: user.practice ? null : () => dbLoadWorld(user.email),
+    cloudSave: user.practice ? null : dbSaveWorld, cloudLoad: user.practice ? null : dbLoadWorld,
     onPanel: openWorldPanel, onTab: (t) => { setWorldPanel(null); setMainTab(t); }, paused: !!(worldPanel || buyModal || showPatchNote || mainTab !== 'world' || (reTx && reTxOpen)), info: worldInfo(),
     owns: ownsProp, taxRate: city.taxRate, mhOwner,
     onHouse: (h) => { setHouseView(h.building); setWorldPanel({ id:'house', title:'🏡 ' + worldListing(MQW.World.CITY.buildings.find(x => x.id === h.building)).address }); },
