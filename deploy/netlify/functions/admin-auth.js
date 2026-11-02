@@ -1,82 +1,83 @@
 /**
  * admin-auth — server-side admin credential check
- * POST { email, password, adminCode } → { ok: boolean, token?: string }
+ * POST { email, password, adminCode } → 200 { ok: true, token } | 401 { ok: false } | 429 { ok: false }
  *
  * Admin credential hashes are read from Netlify environment variables
- * (set in Netlify dashboard → Site configuration → Environment variables):
- *   ADMIN_EMAIL_HASH   — hashPw('email::' + adminEmail.toLowerCase())
- *   ADMIN_PW_HASH      — hashPw('adminpw::' + password)
- *   ADMIN_CODE_HASH    — hashPw('admincode::' + code.toUpperCase())
- *   SESSION_SECRET     — any long random string (used to sign tokens)
+ * (Netlify dashboard → Site configuration → Environment variables):
+ *   ADMIN_EMAIL_HASH   — hash of 'email::' + adminEmail.toLowerCase()
+ *   ADMIN_PW_HASH      — hash of 'adminpw::' + password
+ *   ADMIN_CODE_HASH    — hash of 'admincode::' + code.toUpperCase()
+ *   SESSION_SECRET     — long random string; HKDF-derived keys sign the session tokens
+ * Each hash may be the legacy hashPw format or a scrypt hash from
+ *   node deploy/netlify/functions/lib/crypto.js hash 'adminpw::YourPassword'
+ * (see lib/crypto.js for details).
+ *
+ * Session token: v1.<payload>.<HMAC-SHA256>, payload { sub:'admin', jti, cv, iat, exp }.
+ * `cv` fingerprints the current admin hashes, so changing any admin credential
+ * revokes every outstanding session. Rotating SESSION_SECRET does the same.
  */
 
-const crypto = require('crypto');
+'use strict';
 
-function hashPw(str) {
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
-  return 'h' + h.toString(36) + str.length;
+const C = require('./lib/crypto');
+
+const SESSION_TTL_SECONDS = 8 * 60 * 60; // 8-hour session
+const MAX_FIELD = 256;
+
+/** Fingerprint of the configured admin credentials (bound into every session token).
+ *  Must stay identical to credentialVersion() in verify-admin.js. */
+function credentialVersion(env) {
+  return C.hmac('admin-cred-version', [env.ADMIN_EMAIL_HASH, env.ADMIN_PW_HASH, env.ADMIN_CODE_HASH].join('\n'))
+    .toString('base64url').slice(0, 22);
 }
 
-function makeToken(secret) {
-  const expires = Date.now() + 8 * 60 * 60 * 1000; // 8-hour session
-  const payload = `admin::${expires}`;
-  const sig = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex')
-    .slice(0, 24);
-  return `${expires}.${sig}`;
-}
+const str = (v) => (typeof v === 'string' && v.length > 0 && v.length <= MAX_FIELD ? v : '');
 
 exports.handler = async (event) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-  };
+  const gate = C.methodGate(event);
+  if (gate) return gate;
 
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+  const env = process.env;
+  if (!env.ADMIN_EMAIL_HASH || !env.ADMIN_PW_HASH || !env.ADMIN_CODE_HASH || !env.SESSION_SECRET) {
+    console.error('admin-auth: required env vars are not configured');
+    return C.respond(event, 500, { ok: false, error: 'Server misconfigured' });
   }
 
-  let email, password, adminCode;
+  // Best-effort server-side brute-force throttle (per IP, per warm instance).
+  if (C.throttled('admin-auth:' + C.clientIp(event), 10, 15 * 60 * 1000)) {
+    await C.sleep(400);
+    return C.respond(event, 429, { ok: false });
+  }
+
+  const body = C.parseJsonBody(event, 2048);
+  if (!body) return C.respond(event, 400, { ok: false, error: 'Invalid request' });
+
+  const email = str(body.email);
+  const password = str(body.password);
+  const adminCode = str(body.adminCode);
+
   try {
-    ({ email, password, adminCode } = JSON.parse(event.body || '{}'));
-  } catch {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
+    // Evaluate every check (no short-circuit) so timing doesn't reveal which field matched.
+    const emailMatch = C.verifySecret('email::' + (email ? email.trim().toLowerCase() : '\u0000'), env.ADMIN_EMAIL_HASH) && !!email;
+    const pwMatch    = C.verifySecret('adminpw::' + (password || '\u0000'), env.ADMIN_PW_HASH) && !!password;
+    const codeMatch  = C.verifySecret('admincode::' + (adminCode ? adminCode.trim().toUpperCase() : '\u0000'), env.ADMIN_CODE_HASH) && !!adminCode;
+
+    const ok = (emailMatch && pwMatch) || codeMatch;
+
+    if (!ok) {
+      // Small delay + jitter to slow brute force even if the throttle is bypassed
+      await C.sleep(400 + Math.floor(Math.random() * 200));
+      return C.respond(event, 401, { ok: false });
+    }
+
+    const token = C.sign(
+      { sub: 'admin', jti: C.randomToken(16), cv: credentialVersion(env) },
+      { purpose: 'admin-session', ttlSeconds: SESSION_TTL_SECONDS }
+    );
+    return C.respond(event, 200, { ok: true, token });
+  } catch (err) {
+    console.error('admin-auth: internal error', err && err.message);
+    return C.respond(event, 500, { ok: false, error: 'Server error' });
   }
-
-  const ADMIN_EMAIL_HASH = process.env.ADMIN_EMAIL_HASH;
-  const ADMIN_PW_HASH    = process.env.ADMIN_PW_HASH;
-  const ADMIN_CODE_HASH  = process.env.ADMIN_CODE_HASH;
-  const SESSION_SECRET   = process.env.SESSION_SECRET;   // no fallback: a known default would let anyone forge admin tokens
-
-  if (!ADMIN_EMAIL_HASH || !ADMIN_PW_HASH || !ADMIN_CODE_HASH || !SESSION_SECRET) {
-    console.error('admin-auth: missing env vars');
-    return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfigured' }) };
-  }
-
-  const emailMatch = email
-    ? hashPw('email::' + email.trim().toLowerCase()) === ADMIN_EMAIL_HASH
-    : false;
-  const pwMatch = password
-    ? hashPw('adminpw::' + password) === ADMIN_PW_HASH
-    : false;
-  const codeMatch = adminCode
-    ? hashPw('admincode::' + adminCode.trim().toUpperCase()) === ADMIN_CODE_HASH
-    : false;
-
-  const ok = (emailMatch && pwMatch) || codeMatch;
-
-  if (!ok) {
-    // Small delay to slow brute-force even if rate limiter is bypassed
-    await new Promise(r => setTimeout(r, 400));
-    return { statusCode: 401, headers, body: JSON.stringify({ ok: false }) };
-  }
-
-  return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({ ok: true, token: makeToken(SESSION_SECRET) }),
-  };
 };
+

@@ -1,55 +1,51 @@
 /**
  * verify-admin — validate a previously issued admin session token
- * POST { token: string } → { ok: boolean }
+ * POST { token: string } → 200 { ok: boolean }
  *
- * Requires the same SESSION_SECRET env var as admin-auth.js.
- * The client calls this on page load to restore admin sessions
- * without ever storing hashes in the browser.
+ * Requires the same env vars as admin-auth.js (SESSION_SECRET, ADMIN_EMAIL_HASH,
+ * ADMIN_PW_HASH, ADMIN_CODE_HASH). The client calls this on page load to restore
+ * admin sessions without ever storing hashes in the browser.
+ *
+ * A token is valid only if: its HMAC-SHA256 verifies (constant-time), it has not
+ * expired, it is an admin-session token (purpose-bound key), and its credential
+ * fingerprint matches the CURRENT admin hashes (changing credentials revokes it).
+ * Tokens in the pre-v1 "<expires>.<sig>" format are rejected (forces one re-login).
  */
 
-const crypto = require('crypto');
+'use strict';
+
+const C = require('./lib/crypto');
+
+/** Must stay identical to credentialVersion() in admin-auth.js. */
+function credentialVersion(env) {
+  return C.hmac('admin-cred-version', [env.ADMIN_EMAIL_HASH, env.ADMIN_PW_HASH, env.ADMIN_CODE_HASH].join('\n'))
+    .toString('base64url').slice(0, 22);
+}
 
 exports.handler = async (event) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-  };
+  const gate = C.methodGate(event);
+  if (gate) return gate;
 
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+  const body = C.parseJsonBody(event, 4096);
+  if (!body) return C.respond(event, 400, { ok: false, error: 'Invalid request' });
+
+  const token = body.token;
+  const env = process.env;
+  // Fail closed on anything missing or malformed.
+  if (typeof token !== 'string' || !token || token.length > 2048 ||
+      !env.SESSION_SECRET || !env.ADMIN_EMAIL_HASH || !env.ADMIN_PW_HASH || !env.ADMIN_CODE_HASH) {
+    return C.respond(event, 200, { ok: false });
   }
 
-  let token;
   try {
-    ({ token } = JSON.parse(event.body || '{}'));
-  } catch {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
+    const payload = C.verify(token, { purpose: 'admin-session' });
+    const ok = !!payload &&
+      payload.sub === 'admin' &&
+      typeof payload.cv === 'string' &&
+      C.safeEqual(payload.cv, credentialVersion(env));
+    return C.respond(event, 200, { ok });
+  } catch (err) {
+    console.error('verify-admin: internal error', err && err.message);
+    return C.respond(event, 200, { ok: false });
   }
-
-  if (!token || typeof token !== 'string') {
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: false }) };
-  }
-
-  const SESSION_SECRET = process.env.SESSION_SECRET;
-  if (!SESSION_SECRET) return { statusCode: 200, headers, body: JSON.stringify({ ok: false }) };   // fail closed
-
-  const [expiresStr, sig] = token.split('.');
-  const expires = parseInt(expiresStr, 10);
-
-  if (!expires || !sig || Date.now() > expires) {
-    return { statusCode: 200, headers, body: JSON.stringify({ ok: false }) };
-  }
-
-  const payload = `admin::${expires}`;
-  const expected = crypto
-    .createHmac('sha256', SESSION_SECRET)
-    .update(payload)
-    .digest('hex')
-    .slice(0, 24);
-
-  // Constant-time comparison to prevent timing attacks
-  const ok = sig.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-
-  return { statusCode: 200, headers, body: JSON.stringify({ ok }) };
 };

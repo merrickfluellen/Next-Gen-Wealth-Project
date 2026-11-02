@@ -3,7 +3,20 @@
  * POST { code: string } → { valid: boolean, free: boolean }
  *
  * The hash arrays live here on the server so they are never sent to the browser.
+ *
+ * Hardening (see lib/firewall.js):
+ *   - POST only, origin allowlist, 1 KB body cap, JSON required.
+ *   - Strict per-IP rate limit (best-effort per warm instance) against code brute-forcing.
+ *   - Constant-time comparison against EVERY stored hash (no early exit → no timing signal).
+ *   - Any malformed/oversized code gets the same { valid:false, free:false } answer as a wrong
+ *     code, so responses never hint at the code format. Codes are never logged.
  */
+const crypto = require('crypto');
+const { withFirewall } = require('./lib/firewall');
+
+const MAX_CODE_LEN = 64;
+// Printable ASCII only — rejects control chars / exotic Unicode without guessing the code alphabet.
+const CODE_RE = /^[\x20-\x7E]+$/;
 
 const VALID_CODE_HASHES = [
   "h10o44zi25","h1sazc2l22","h1iagmip22","hzp045922","h1qifltf22","h1eznbf822",
@@ -51,35 +64,50 @@ function hashPw(str) {
   return 'h' + h.toString(36) + str.length;
 }
 
-exports.handler = async (event) => {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cache-Control': 'no-store',
-  };
+/** Fixed-width buffer so timingSafeEqual always compares equal lengths. */
+function toBuf(str) {
+  const b = Buffer.alloc(MAX_CODE_LEN);
+  b.write(str, 'utf8');
+  return b;
+}
+const VALID_BUFS = VALID_CODE_HASHES.map(toBuf);
+const FREE_BUFS  = FREE_CODE_HASHES.map(toBuf);
 
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+/** True if `buf` equals any entry; always scans the whole list in constant time per entry. */
+function inList(buf, list) {
+  let hit = 0;
+  for (const b of list) hit |= crypto.timingSafeEqual(buf, b) ? 1 : 0;
+  return hit === 1;
+}
+
+/** NFKC + trim + uppercase, matching the client's `code.trim().toUpperCase()` for ASCII codes. */
+function normalizeCode(code) {
+  if (typeof code !== 'string' || code.length > MAX_CODE_LEN * 4) return null;
+  const n = code.normalize('NFKC').trim().toUpperCase();
+  if (!n || n.length > MAX_CODE_LEN || !CODE_RE.test(n)) return null;
+  return n;
+}
+
+async function validateCode(event) {
+  const { code } = event.jsonBody || {};
+  if (typeof code !== 'string' || code.trim().length === 0) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Missing code' }) };
   }
 
-  let code;
-  try {
-    ({ code } = JSON.parse(event.body || '{}'));
-  } catch {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) };
-  }
+  const normalized = normalizeCode(code);
+  // Hash even when the format is invalid so timing does not reveal the format check.
+  const hash = toBuf(hashPw('code::' + (normalized || '\u0000invalid')));
+  const valid = normalized !== null && inList(hash, VALID_BUFS);
+  const free  = valid && inList(hash, FREE_BUFS);
 
-  if (!code || typeof code !== 'string' || code.trim().length === 0) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing code' }) };
-  }
+  return { statusCode: 200, body: JSON.stringify({ valid, free }) };
+}
 
-  const normalized = code.trim().toUpperCase();
-  const hash = hashPw('code::' + normalized);
-  const valid = VALID_CODE_HASHES.includes(hash);
-  const free  = FREE_CODE_HASHES.includes(hash);
-
-  return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({ valid, free }),
-  };
-};
+exports.handler = withFirewall(validateCode, {
+  name: 'validate-code',
+  methods: ['POST'],
+  // A real student enters a code once or twice; 10 tries / 15 min per IP stops brute-force loops.
+  rateLimit: { windowMs: 15 * 60 * 1000, max: 10 },
+  maxBodyBytes: 1024,
+  json: true,
+});

@@ -21,6 +21,7 @@
 <meta property="og:image" content="https://nextgenwealthproject.netlify.app/og-image.png" />
 <meta property="og:image:width" content="1200" />
 <meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="Money Quest by InvestEd Pro: a money lessons game for kids and teens" />
 <meta property="og:locale" content="en_US" />
 
 <!-- ── Twitter / X Card ── -->
@@ -28,6 +29,7 @@
 <meta name="twitter:title" content="Money Quest by InvestEd Pro — Money Lessons Game for Kids & Teens" />
 <meta name="twitter:description" content="A money learning game for kids and teens: XP, stars, stickers and a Money City investing simulator. Pro track aligned to Missouri DESE Personal Finance. Free to start." />
 <meta name="twitter:image" content="https://nextgenwealthproject.netlify.app/og-image.png" />
+<meta name="twitter:image:alt" content="Money Quest by InvestEd Pro: a money lessons game for kids and teens" />
 
 <!-- ── JSON-LD Structured Data (Google Rich Results) ── -->
 <script type="application/ld+json">
@@ -548,7 +550,7 @@ footer nav a:hover { color:var(--mq-text); }
       <h2 id="how-title">Learn it. Try it. <span class="gold">Fix it.</span> Earn it.</h2>
       <p class="sec-lead">Every lesson takes about five minutes and follows the same loop, so kids always know what comes next.</p>
     </div>
-    <ol class="loop reveal" style="list-style:none">
+    <ol class="loop reveal" role="list" style="list-style:none">
       <li class="step"><div class="step-node" style="background:var(--mq-w-blue)" aria-hidden="true">📖</div><small>Step 1</small><h3>Learn</h3><p>Short cards with Penny explain one idea at a time.</p></li>
       <li class="step"><div class="step-node" style="background:var(--mq-w-purple)" aria-hidden="true">🎯</div><small>Step 2</small><h3>Quiz</h3><p>Six quick questions check what stuck.</p></li>
       <li class="step"><div class="step-node" style="background:var(--mq-try)" aria-hidden="true">🔧</div><small>Step 3</small><h3>Fix-It</h3><p>Missed questions come back until they're right. Miss a lot? Retake the lesson.</p></li>
@@ -836,7 +838,7 @@ footer nav a:hover { color:var(--mq-text); }
     setBar();
     var st = '';
     for (var i = 1; i <= 3; i++) st += '<span class="' + (i <= stars ? '' : 'off') + '" style="animation-delay:' + (i * 0.2) + 's">⭐</span>';
-    body.innerHTML = '<div class="done"><div class="stars" aria-label="' + stars + ' of 3 stars">' + st + '</div><h3 style="font-size:28px;margin-top:4px">' + (m === 0 ? 'PERFECT LEVEL!' : 'Level complete!') + '</h3>' +
+    body.innerHTML = '<div class="done"><div class="stars" role="img" aria-label="' + stars + ' of 3 stars">' + st + '</div><h3 style="font-size:28px;margin-top:4px">' + (m === 0 ? 'PERFECT LEVEL!' : 'Level complete!') + '</h3>' +
       '<p style="color:var(--mq-text-2)">+' + S.xp + ' XP' + (m ? ' · You fixed every mistake 💪' : ' · Every answer right the first time!') + '</p>' +
       '<div id="gift-zone" style="margin-top:10px"><button type="button" class="gift" id="gift" aria-label="Open your mystery gift">🎁</button><p style="color:var(--mq-text-2);font-weight:600">Tap the mystery gift! 👆</p></div></div>';
     live.textContent = 'Level complete. ' + stars + ' stars. Open your mystery gift.';

@@ -8,6 +8,13 @@
 <meta property="og:title" content="InvestEd Pro — The Financial Education They Never Taught You" />
 <meta property="og:description" content="Have you ever felt like the school system isn't broken — it's just incomplete? We're here to solve that." />
 <meta property="og:image" content="https://nextgenwealthproject.netlify.app/og-image.png" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://nextgenwealthproject.netlify.app/" />
+<!-- Legacy page: Netlify 301-redirects /landing.html to /, so point search engines at the homepage -->
+<link rel="canonical" href="https://nextgenwealthproject.netlify.app/" />
+<meta name="robots" content="noindex, follow" />
+<meta name="theme-color" content="#060912" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%23E8A317'/%3E%3Ccircle cx='32' cy='30.5' r='29.5' fill='%23FFC83D'/%3E%3Ccircle cx='32' cy='31' r='24.5' fill='none' stroke='%23E8A317' stroke-width='2.5'/%3E%3Cpath d='M14.5 28 16.5 11 29.5 19ZM49.5 28 47.5 11 34.5 19Z' fill='%23F2618D'/%3E%3Cellipse cx='32' cy='34.5' rx='19.5' ry='17' fill='%23FF9CB8'/%3E%3Ccircle cx='23.5' cy='29' r='3' fill='%230E1433'/%3E%3Ccircle cx='40.5' cy='29' r='3' fill='%230E1433'/%3E%3Cellipse cx='32' cy='40' rx='10' ry='7' fill='%23F2618D'/%3E%3Cellipse cx='28.5' cy='40' rx='2.1' ry='3' fill='%230E1433'/%3E%3Cellipse cx='35.5' cy='40' rx='2.1' ry='3' fill='%230E1433'/%3E%3Cpath d='m32 2.2 2.2 4.4 4.9.7-3.5 3.4.8 4.8-4.4-2.3-4.4 2.3.8-4.8-3.5-3.4 4.9-.7z' fill='%23fff' stroke='%23E8A317' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E">
 
 <style>
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,6 +32,7 @@
   --blue:   #3b82f6;
   --gold:   #f59e0b;
   --purple: #8b5cf6;
+  --red-text: #f87171; /* lighter red: >=4.5:1 on dark cards for small text */
 }
 
 html { scroll-behavior: smooth; }
@@ -49,7 +57,7 @@ body::before {
 }
 
 /* ── NAV ── */
-nav {
+.site-nav {
   position: fixed;
   top: 0; left: 0; right: 0;
   z-index: 100;
@@ -76,7 +84,7 @@ nav {
   box-shadow: 0 4px 16px rgba(220,38,38,0.4);
 }
 .nav-logo-text { font-size: 18px; font-weight: 800; color: var(--text); }
-.nav-logo-text span { color: var(--red); }
+.nav-logo-text span { color: var(--red-text); }
 .nav-cta {
   display: flex; gap: 12px; align-items: center;
 }
@@ -260,7 +268,7 @@ section { padding: 100px 24px; position: relative; }
 .section-tag {
   font-size: 11px;
   font-weight: 800;
-  color: var(--red);
+  color: var(--red-text);
   text-transform: uppercase;
   letter-spacing: 2px;
   margin-bottom: 12px;
@@ -499,7 +507,7 @@ section { padding: 100px 24px; position: relative; }
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(220,38,38,0.15);
-  color: var(--red);
+  color: var(--red-text);
 }
 .unit-badge.new { background: rgba(16,185,129,0.15); color: var(--green); }
 
@@ -561,8 +569,8 @@ section { padding: 100px 24px; position: relative; }
 .price-list { list-style: none; margin-bottom: 28px; display: flex; flex-direction: column; gap: 10px; }
 .price-list li { display: flex; gap: 10px; font-size: 13px; color: var(--muted); align-items: flex-start; }
 .price-list li::before { content: '✓'; color: var(--green); font-weight: 800; flex-shrink: 0; }
-.price-list li.no { color: #4b5563; }
-.price-list li.no::before { content: '✕'; color: #374151; }
+.price-list li.no { color: #9aa3b5; text-decoration: line-through; }
+.price-list li.no::before { content: '✕'; color: #9aa3b5; }
 .btn-price {
   display: block;
   text-align: center;
@@ -609,7 +617,7 @@ section { padding: 100px 24px; position: relative; }
   font-size: 36px;
   flex-shrink: 0;
 }
-.compliance h3 { font-size: 20px; font-weight: 800; color: var(--green); margin-bottom: 8px; }
+.compliance h3, .compliance-title { font-size: 20px; font-weight: 800; color: var(--green); margin-bottom: 8px; }
 .compliance p { font-size: 14px; color: var(--muted); line-height: 1.7; }
 .compliance-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .compliance-chip {
@@ -673,9 +681,19 @@ footer {
   transform: translateY(0);
 }
 
+/* ── A11Y ── */
+.skip { position: absolute; left: 12px; top: -60px; z-index: 200; background: #fff; color: #060912; padding: 10px 16px; border-radius: 8px; font-weight: 700; text-decoration: none; }
+.skip:focus { top: 12px; }
+a:focus-visible { outline: 3px solid #f87171; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .fade-up { opacity: 1; transform: none; }
+}
+
 /* ── MOBILE ── */
 @media (max-width: 768px) {
-  nav { padding: 14px 20px; }
+  .site-nav { padding: 14px 20px; }
   .nav-cta .btn-ghost-nav { display: none; }
   .problem-grid, .showcase-inner { grid-template-columns: 1fr; }
   .features-grid { grid-template-columns: 1fr; }
@@ -693,23 +711,27 @@ footer {
 </head>
 <body>
 
+<a class="skip" href="#main">Skip to content</a>
+
 <!-- ── NAV ── -->
-<nav>
-  <a href="#" class="nav-logo">
-    <div class="nav-logo-icon">IE</div>
+<nav class="site-nav" aria-label="Main">
+  <a href="#main" class="nav-logo" aria-label="InvestEd Pro, top of page">
+    <div class="nav-logo-icon" aria-hidden="true">IE</div>
     <div class="nav-logo-text">InvestEd <span>Pro</span></div>
   </a>
   <div class="nav-cta">
-    <a href="index.html" class="btn-ghost-nav">Sign In</a>
-    <a href="index.html" class="btn-nav">Get Started →</a>
+    <a href="app.html" class="btn-ghost-nav">Sign In</a>
+    <a href="app.html" class="btn-nav">Get Started →</a>
   </div>
 </nav>
 
+<main id="main">
+
 <!-- ── HERO ── -->
 <section class="hero">
-  <div class="orb orb1"></div>
-  <div class="orb orb2"></div>
-  <div class="orb orb3"></div>
+  <div class="orb orb1" aria-hidden="true"></div>
+  <div class="orb orb2" aria-hidden="true"></div>
+  <div class="orb orb3" aria-hidden="true"></div>
   <div class="hero-inner">
     <div class="hero-eyebrow">Now live — v2.0</div>
 
@@ -728,7 +750,7 @@ footer {
     </p>
 
     <div class="hero-actions">
-      <a href="index.html" class="btn-hero">🚀 Launch the App</a>
+      <a href="app.html" class="btn-hero">🚀 Launch the App</a>
       <a href="#features" class="btn-hero-ghost">See what's inside ↓</a>
     </div>
 
@@ -763,15 +785,15 @@ footer {
         <p class="section-sub">You graduate knowing the mitochondria is the powerhouse of the cell. But can you file your taxes? Open a brokerage account? Understand compound interest? Didn't think so.</p>
         <div class="problem-list">
           <div class="problem-item">
-            <span class="problem-x">📚</span>
+            <span class="problem-x" aria-hidden="true">📚</span>
             <div class="problem-text"><strong>Zero financial literacy in the curriculum</strong>Only 1 in 4 states require a standalone personal finance course — and most barely scratch the surface.</div>
           </div>
           <div class="problem-item">
-            <span class="problem-x">💸</span>
+            <span class="problem-x" aria-hidden="true">💸</span>
             <div class="problem-text"><strong>Real consequences hit fast</strong>The average 22-year-old enters the workforce with $29K in student debt and no idea how interest works.</div>
           </div>
           <div class="problem-item">
-            <span class="problem-x">📉</span>
+            <span class="problem-x" aria-hidden="true">📉</span>
             <div class="problem-text"><strong>By the time you learn, it's expensive</strong>Mistakes with real money in your 20s compound into lost wealth in your 40s.</div>
           </div>
         </div>
@@ -799,42 +821,42 @@ footer {
     <div class="features-grid" style="margin-top:56px">
 
       <div class="feature-card fade-up" style="--accent-color:rgba(220,38,38,0.06);--accent-border:rgba(220,38,38,0.4)">
-        <div class="feature-icon" style="background:rgba(220,38,38,0.12)">📈</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(220,38,38,0.12)">📈</div>
         <h3>Live Stock Simulator</h3>
         <p>Trade real tickers (AAPL, VOO, TSLA…) with $50,000 in sim cash. Live Yahoo Finance prices, buy/sell modals, gain/loss tracking.</p>
-        <span class="feature-tag" style="background:rgba(220,38,38,0.12);color:var(--red)">Real-time data</span>
+        <span class="feature-tag" style="background:rgba(220,38,38,0.12);color:var(--red-text)">Real-time data</span>
       </div>
 
       <div class="feature-card fade-up" style="--accent-color:rgba(247,147,26,0.06);--accent-border:rgba(247,147,26,0.4)">
-        <div class="feature-icon" style="background:rgba(247,147,26,0.12)">₿</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(247,147,26,0.12)">₿</div>
         <h3>Crypto Market</h3>
         <p>Top 30 coins with live CoinGecko prices. Buy Bitcoin, Ethereum, Solana — fractional shares supported. 24hr change + market cap.</p>
         <span class="feature-tag" style="background:rgba(247,147,26,0.12);color:#f7931a">Top 30 coins</span>
       </div>
 
       <div class="feature-card fade-up" style="--accent-color:rgba(16,185,129,0.06);--accent-border:rgba(16,185,129,0.4)">
-        <div class="feature-icon" style="background:rgba(16,185,129,0.12)">🏠</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(16,185,129,0.12)">🏠</div>
         <h3>Real Estate MLS</h3>
         <p>40 daily-generated properties with full investment analysis — cap rate, NOI, cash flow, DSCR. Rent to tenants, flip, or wholesale.</p>
         <span class="feature-tag" style="background:rgba(16,185,129,0.12);color:var(--green)">New in v2.0</span>
       </div>
 
       <div class="feature-card fade-up" style="--accent-color:rgba(139,92,246,0.06);--accent-border:rgba(139,92,246,0.4)">
-        <div class="feature-icon" style="background:rgba(139,92,246,0.12)">💰</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(139,92,246,0.12)">💰</div>
         <h3>Bond Market</h3>
         <p>T-Bills, corporate bonds, municipal bonds, and TIPS. Buy, collect monthly interest, sell. Understand yield, maturity, and fixed income.</p>
         <span class="feature-tag" style="background:rgba(139,92,246,0.12);color:var(--purple)">15 bond types</span>
       </div>
 
       <div class="feature-card fade-up" style="--accent-color:rgba(59,130,246,0.06);--accent-border:rgba(59,130,246,0.4)">
-        <div class="feature-icon" style="background:rgba(59,130,246,0.12)">📚</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(59,130,246,0.12)">📚</div>
         <h3>Structured Lessons</h3>
         <p>8 units, 50+ lessons covering budgeting, banking, investing, taxes, insurance, and more. Complete lessons to earn sim cash rewards.</p>
         <span class="feature-tag" style="background:rgba(59,130,246,0.12);color:var(--blue)">+$1K per lesson</span>
       </div>
 
       <div class="feature-card fade-up" style="--accent-color:rgba(245,158,11,0.06);--accent-border:rgba(245,158,11,0.4)">
-        <div class="feature-icon" style="background:rgba(245,158,11,0.12)">📜</div>
+        <div class="feature-icon" aria-hidden="true" style="background:rgba(245,158,11,0.12)">📜</div>
         <h3>Real Estate License</h3>
         <p>Complete 5 RE lessons, pass the 20-question exam with 75%, and earn your honorary license certificate. Unlocks property selling.</p>
         <span class="feature-tag" style="background:rgba(245,158,11,0.12);color:var(--gold)">Earn a certificate</span>
@@ -848,7 +870,7 @@ footer {
 <section class="showcase">
   <div class="container">
     <div class="showcase-inner">
-      <div class="showcase-visual fade-up">
+      <div class="showcase-visual fade-up" role="img" aria-label="Preview of the simulator: stock prices and a net worth card">
         <div class="sim-header">
           <div class="sim-tabs">
             <span class="sim-tab inactive">👛 Wallet</span>
@@ -903,28 +925,28 @@ footer {
         <p class="section-sub">Every concept you learn in the lessons is immediately available to practice in the live simulator — with real market data, real strategies, and zero risk.</p>
         <ul class="showcase-list">
           <li class="showcase-item">
-            <div class="showcase-check">✓</div>
+            <div class="showcase-check" aria-hidden="true">✓</div>
             <div class="showcase-item-text">
               <strong>Real prices, zero real money</strong>
               <span>Live data from Yahoo Finance + CoinGecko. Buy, sell, and watch your portfolio grow in real time.</span>
             </div>
           </li>
           <li class="showcase-item">
-            <div class="showcase-check">✓</div>
+            <div class="showcase-check" aria-hidden="true">✓</div>
             <div class="showcase-item-text">
               <strong>Every asset class in one place</strong>
               <span>Stocks, ETFs, crypto, bonds, and real estate — all in the same simulator with the same dollars.</span>
             </div>
           </li>
           <li class="showcase-item">
-            <div class="showcase-check">✓</div>
+            <div class="showcase-check" aria-hidden="true">✓</div>
             <div class="showcase-item-text">
               <strong>Earn rewards for learning</strong>
               <span>Complete lessons to unlock +$1,000 in sim cash. The more you learn, the more you can invest.</span>
             </div>
           </li>
           <li class="showcase-item">
-            <div class="showcase-check">✓</div>
+            <div class="showcase-check" aria-hidden="true">✓</div>
             <div class="showcase-item-text">
               <strong>Progress synced to the cloud</strong>
               <span>Sign in from any device and pick up right where you left off. Your portfolio travels with you.</span>
@@ -946,49 +968,49 @@ footer {
     </div>
     <div class="units-grid">
       <div class="unit-card fade-up">
-        <span class="unit-icon">💵</span>
+        <span class="unit-icon" aria-hidden="true">💵</span>
         <div class="unit-title">Financial Foundations</div>
         <div class="unit-count">5 lessons</div>
         <span class="unit-badge">Unit 1</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">🏦</span>
+        <span class="unit-icon" aria-hidden="true">🏦</span>
         <div class="unit-title">Banking & Credit</div>
         <div class="unit-count">5 lessons</div>
         <span class="unit-badge">Unit 2</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">📈</span>
+        <span class="unit-icon" aria-hidden="true">📈</span>
         <div class="unit-title">Stocks & Investing</div>
         <div class="unit-count">6 lessons</div>
         <span class="unit-badge">Unit 3</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">🌍</span>
+        <span class="unit-icon" aria-hidden="true">🌍</span>
         <div class="unit-title">Economics</div>
         <div class="unit-count">5 lessons</div>
         <span class="unit-badge">Unit 4</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">🛡️</span>
+        <span class="unit-icon" aria-hidden="true">🛡️</span>
         <div class="unit-title">Insurance & Risk</div>
         <div class="unit-count">4 lessons</div>
         <span class="unit-badge">Unit 5</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">🧾</span>
+        <span class="unit-icon" aria-hidden="true">🧾</span>
         <div class="unit-title">Taxes & Income</div>
         <div class="unit-count">4 lessons</div>
         <span class="unit-badge">Unit 6</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">₿</span>
+        <span class="unit-icon" aria-hidden="true">₿</span>
         <div class="unit-title">Cryptocurrency</div>
         <div class="unit-count">3 lessons</div>
         <span class="unit-badge new">New</span>
       </div>
       <div class="unit-card fade-up">
-        <span class="unit-icon">🏠</span>
+        <span class="unit-icon" aria-hidden="true">🏠</span>
         <div class="unit-title">Real Estate</div>
         <div class="unit-count">5 lessons + exam</div>
         <span class="unit-badge new">New</span>
@@ -1006,10 +1028,10 @@ footer {
     </div>
     <div class="testi-grid">
       <div class="testi-card fade-up">
-        <div class="testi-stars">★★★★★</div>
+        <div class="testi-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
         <p class="testi-quote">"I never understood what a Roth IRA even was until I found InvestEd Pro. Now I'm actually looking into opening one for real. This should be taught in every school."</p>
         <div class="testi-author">
-          <div class="testi-avatar">J</div>
+          <div class="testi-avatar" aria-hidden="true">J</div>
           <div>
             <div class="testi-name">Jaylen M.</div>
             <div class="testi-role">High school junior, Missouri</div>
@@ -1017,10 +1039,10 @@ footer {
         </div>
       </div>
       <div class="testi-card fade-up">
-        <div class="testi-stars">★★★★★</div>
+        <div class="testi-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
         <p class="testi-quote">"The real estate simulator is insane. I flipped my first virtual house for $40K profit and now I actually understand cap rates, NOI, and why location matters."</p>
         <div class="testi-author">
-          <div class="testi-avatar">S</div>
+          <div class="testi-avatar" aria-hidden="true">S</div>
           <div>
             <div class="testi-name">Sofia R.</div>
             <div class="testi-role">10th grader, Kansas City</div>
@@ -1028,10 +1050,10 @@ footer {
         </div>
       </div>
       <div class="testi-card fade-up">
-        <div class="testi-stars">★★★★★</div>
+        <div class="testi-stars" role="img" aria-label="5 out of 5 stars">★★★★★</div>
         <p class="testi-quote">"My econ teacher had us use this for an entire semester. Watching real market prices move while I'm learning — nothing else compares. I finally understand why crypto is so volatile."</p>
         <div class="testi-author">
-          <div class="testi-avatar">D</div>
+          <div class="testi-avatar" aria-hidden="true">D</div>
           <div>
             <div class="testi-name">Devon K.</div>
             <div class="testi-role">12th grader, St. Louis</div>
@@ -1046,9 +1068,9 @@ footer {
 <section class="compliance">
   <div class="container">
     <div class="compliance-inner fade-up">
-      <div class="compliance-seal">🎓</div>
+      <div class="compliance-seal" aria-hidden="true">🎓</div>
       <div>
-        <h3>Missouri Graduation Requirement — Aligned</h3>
+        <h2 class="compliance-title">Missouri Graduation Requirement — Aligned</h2>
         <p>Beginning with the 2025–26 school year, Missouri requires every high school student to complete a 0.5-credit standalone Personal Finance course before receiving a diploma. InvestEd Pro is designed specifically to fulfill that requirement — covering all Missouri DESE Course-Level Expectations.</p>
         <div class="compliance-chips">
           <span class="compliance-chip">DESE Aligned</span>
@@ -1084,7 +1106,7 @@ footer {
           <li class="no">Progress cloud sync</li>
           <li class="no">Real Estate License exam</li>
         </ul>
-        <a href="index.html" class="btn-price outline">Try for Free</a>
+        <a href="app.html" class="btn-price outline">Try for Free</a>
       </div>
 
       <div class="price-card featured fade-up">
@@ -1100,7 +1122,7 @@ footer {
           <li>Progress synced across all devices</li>
           <li>Priority support</li>
         </ul>
-        <a href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" target="_blank" rel="noopener" class="btn-price primary">Get Access — $10/mo</a>
+        <a href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" target="_blank" rel="noopener noreferrer" class="btn-price primary">Get Access — $10/mo</a>
       </div>
 
       <div class="price-card fade-up">
@@ -1128,27 +1150,33 @@ footer {
     <h2>Your financial future<br>starts <span style="color:var(--red)">right now.</span></h2>
     <p>Every day you wait is a day of compound interest you'll never get back. The knowledge that InvestEd Pro gives you is worth more than any single investment.</p>
     <div class="hero-actions">
-      <a href="index.html" class="btn-hero">🚀 Start Learning Free</a>
-      <a href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" target="_blank" rel="noopener" class="btn-hero-ghost">Subscribe — $10/mo</a>
+      <a href="app.html" class="btn-hero">🚀 Start Learning Free</a>
+      <a href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" target="_blank" rel="noopener noreferrer" class="btn-hero-ghost">Subscribe — $10/mo</a>
     </div>
   </div>
 </section>
+
+</main>
 
 <!-- ── FOOTER ── -->
 <footer>
   <div class="footer-inner">
     <div class="footer-copy">© 2026 InvestEd Pro · Merrick Fluellen · For educational use only — not investment advice.</div>
-    <div class="footer-links">
-      <a href="index.html">App</a>
+    <nav class="footer-links" aria-label="Footer">
+      <a href="app.html">App</a>
       <a href="#pricing">Pricing</a>
       <a href="mailto:merrick.fluellen@gmail.com">Contact</a>
-    </div>
+    </nav>
   </div>
 </footer>
 
 <script>
-// Fade-up on scroll
-const observer = new IntersectionObserver((entries) => {
+// Fade-up on scroll (shows everything at once if motion is reduced or IO is missing)
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (reduceMotion || !('IntersectionObserver' in window)) {
+  document.querySelectorAll('.fade-up').forEach(el => el.classList.add('visible'));
+}
+const observer = ('IntersectionObserver' in window) && !reduceMotion && new IntersectionObserver((entries) => {
   entries.forEach(e => {
     if (e.isIntersecting) {
       e.target.classList.add('visible');
@@ -1159,16 +1187,16 @@ const observer = new IntersectionObserver((entries) => {
 
 document.querySelectorAll('.fade-up').forEach((el, i) => {
   el.style.transitionDelay = (i % 4) * 80 + 'ms';
-  observer.observe(el);
+  if (observer) observer.observe(el);
 });
 
 // Nav background on scroll
-const nav = document.querySelector('nav');
+const nav = document.querySelector('.site-nav');
 window.addEventListener('scroll', () => {
   nav.style.background = window.scrollY > 50
     ? 'rgba(6,9,18,0.95)'
     : 'rgba(6,9,18,0.7)';
-});
+}, { passive: true });
 </script>
 </body>
 </html>

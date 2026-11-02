@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /app.html
+Disallow: /.netlify/functions/
 Disallow: /.netlify/
 
 Sitemap: https://nextgenwealthproject.netlify.app/sitemap.xml

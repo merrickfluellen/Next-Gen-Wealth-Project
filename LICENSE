@@ -1,86 +1,252 @@
 MoneyQuest Source-Available License
-Version 1.0
+Version 1.1
 
 Copyright (c) 2026 merrickfluellen (https://github.com/merrickfluellen).
 All rights reserved except as expressly granted below.
 
+This is NOT an open-source license. In short: you may use MoneyQuest for
+free for non-commercial purposes. You may not make money from it, or from
+anything that uses more than 5% of it, unless the Licensor gives you signed
+written permission. The full rules are below. If you do not agree to them,
+you have no permission to use the Original Work at all.
+
 1. Definitions
 
-   "Licensor" means the copyright holder named above.
+   (a) "Licensor" means the copyright holder named above, and anyone the
+       Licensor's rights later pass to (such as heirs or successors).
 
-   "Original Work" means all source code, markup, scripts, configuration,
-   lesson and game content, text, and data files published by the Licensor
-   in this repository, in any version.
+   (b) "You" means the person or organization using the Original Work,
+       together with its Affiliates and anyone acting for it or with it
+       (such as employees, contractors, agents, or partners). If you use
+       the Original Work for an organization, you accept this license for
+       that organization, and the organization is responsible for your use.
 
-   "Derivative Work" means any software, website, app, game, service, or
-   other work that copies, modifies, adapts, translates, ports, minifies,
-   obfuscates, or otherwise incorporates any part of the Original Work.
+   (c) "Affiliate" means any organization that controls, is controlled by,
+       or is under common control with you, or that shares owners,
+       directors, or officers with you. "Control" means owning more than
+       half of it or having the power to direct its decisions.
 
-   "Commercial Use" means any use intended for or directed toward
-   commercial advantage or monetary compensation, including but not
-   limited to: selling or licensing the work; charging for access,
-   subscriptions, accounts, or features; in-app purchases; displaying
-   advertising; sponsorships; collecting fees, donations, or tips tied to
-   access; or using the work to promote or operate a paid product or
-   service.
+   (d) "Original Work" means everything the Licensor has published as part
+       of MoneyQuest or InvestEd Pro, in any version, in this repository
+       (including its history) or on any website or service the Licensor
+       runs. This includes source code, markup, scripts, styles,
+       configuration, data files, lesson and quiz text, game rules,
+       scenarios, numbers and settings, designs, and other content.
+       It does not include material made by third parties that is included
+       under its own license (that material keeps its own license).
 
-   "Copied Portion" means every part of the Original Work contained in a
-   Derivative Work, counted in lines, including parts that were modified,
-   reformatted, renamed, translated into another language, minified, or
-   obfuscated but remain substantially similar to the Original Work.
+   (e) "Covered Work" means the Original Work itself (modified or not),
+       and any Derivative Work.
 
-   "Five Percent Threshold" is met when the Copied Portion exceeds five
-   percent (5%) of the total lines of the Original Work.
+   (f) "Derivative Work" means any software, website, app, game, course,
+       document, dataset, service, or other work that copies, modifies,
+       adapts, translates (into any human or programming language), ports,
+       reformats, minifies, obfuscates, paraphrases, or otherwise uses or is
+       based on any part of the Original Work. A work is still a Derivative
+       Work if it was made by a person or a tool (including an AI tool)
+       that read, studied, or was given the Original Work to produce it.
 
-2. Non-Commercial Permission
+   (g) "Commercial Use" means any use of a Covered Work that is meant to
+       earn money or give a commercial advantage to anyone, whether or not
+       a profit is actually made, and whether or not the user is a
+       nonprofit. It includes, for example:
+         - selling, renting, or licensing it, or charging for access,
+           accounts, subscriptions, features, downloads, or hosting;
+         - showing advertising, sponsorships, affiliate or referral links,
+           or paid placements in it or alongside it;
+         - collecting, selling, or using user data for marketing or profit;
+         - asking for donations, tips, or payments in return for access, or
+           charging tuition, course, class, tutoring, or event fees where
+           the Covered Work is a significant part of what is offered;
+         - using it to promote, attract users to, or support a paid product
+           or service, including as a free "lead magnet";
+         - using it inside a for-profit organization for its own business
+           (for example, staff training, customer education, or as part of
+           a product), even if it is never shown to the public;
+         - using it to train, fine-tune, test, or improve an AI or machine
+           learning model, dataset, or product that is sold or used
+           commercially.
+       Personal learning, and teaching in a school, library, club, or
+       nonprofit program where no one is charged for access to the Covered
+       Work, are NOT Commercial Use.
 
-   You may view, download, run, modify, and share the Original Work and
-   Derivative Works for personal, educational, and other non-commercial
-   purposes, provided that you keep this license and the copyright notice
-   above in every copy and give clear credit to the Licensor.
+   (h) "Used Portion" means every part of the Original Work that a Covered
+       Work copies, adapts, or is substantially similar to, including parts
+       that were reworded, renamed, reformatted, reordered, split up,
+       translated, minified, obfuscated, or regenerated by an AI tool.
+       Each part counts once, even if it is used many times.
 
-3. Commercial Use Restriction
+2. How the 5% Threshold Is Measured
 
-   (a) You may NOT make Commercial Use of any Derivative Work that meets
-       the Five Percent Threshold, unless you first obtain separate written
-       permission signed by the Licensor.
+   (a) The "Five Percent Threshold" is met when the Used Portion is more
+       than five percent (5%) of the Original Work by EITHER of these
+       measures (whichever gives the higher percentage):
+         (1) lines: non-blank lines of text; or
+         (2) characters: characters other than spaces, tabs, and line
+             breaks.
 
-   (b) You may make Commercial Use of a Derivative Work that does NOT meet
-       the Five Percent Threshold, provided that you include the copyright
-       notice above and credit the Licensor.
+   (b) Both measures are taken on the Original Work's own files, exactly
+       as the Licensor published them, NOT on your work. So it does not
+       matter how big your work is, how you format it, or how you split,
+       join, pad, minify, or rewrite lines in it.
 
-   (c) You may not avoid the Five Percent Threshold by splitting the
-       Original Work across several products, releases, or services that
-       are offered together or by the same person or organization. The
-       Copied Portions of all such works are added together.
+   (c) The whole Original Work (the number you divide by) is the single
+       published version of the Original Work you took material from. If
+       you took material from more than one version, use the smallest of
+       those versions. Versions are never added together. Third-party
+       material, automatically generated files (such as lock files or build
+       output), and duplicate copies of the same file are not counted in
+       either the Used Portion or the whole.
 
-   (d) If there is a dispute about whether a Derivative Work meets the
-       Five Percent Threshold, the person making Commercial Use must prove
-       that it does not.
+   (d) Everything you and your Affiliates have ever made Commercial Use of
+       is added together. You may not get under 5% by splitting material
+       across several products, versions, releases, updates, services,
+       companies, or people.
 
-4. Names and Branding
+   (e) The Original Work itself, with or without changes, always meets the
+       Five Percent Threshold.
 
-   This license does not grant any right to use the names "MoneyQuest",
-   "InvestEd Pro", or any other name, logo, or branding of the Licensor,
-   except to give the credit required above.
+   (f) If you make Commercial Use of a Covered Work, it is your job to prove
+       that it does not meet the Five Percent Threshold. Within 30 days of
+       a written request from the Licensor, you must provide enough of your
+       work's source code and content (which may be kept confidential) to
+       check this. If you do not, the threshold is treated as met.
 
-5. Termination
+3. Free Non-Commercial Permission
 
-   If you break any term of this license, your permissions under it end
-   automatically and immediately. You must then stop all use and
-   distribution of the Original Work and of any Derivative Work, and the
-   Licensor may pursue all remedies available under copyright and other
-   law, including damages and recovery of profits earned from the
-   unauthorized Commercial Use.
+   If you follow every term of this license, the Licensor gives you a free,
+   worldwide, non-exclusive, non-transferable permission to view, download,
+   run, modify, and share Covered Works for non-commercial purposes only.
 
-6. No Warranty
+4. Commercial Use
+
+   (a) You may NOT make Commercial Use of any Covered Work that meets the
+       Five Percent Threshold unless you first get Written Permission from
+       the Licensor.
+
+   (b) You MAY make Commercial Use of a Derivative Work that does NOT meet
+       the Five Percent Threshold, as long as you follow Section 5
+       (Credit) and every other term of this license.
+
+   (c) Non-text files made by the Licensor (such as images, audio, or
+       video), if any, may not be used commercially at all without Written
+       Permission, no matter how much else you use.
+
+   (d) "Written Permission" means a document, on paper or electronic, that
+       is signed by the Licensor (an electronic signature counts), names
+       you, and clearly grants Commercial Use. Nothing else counts as
+       permission, including: silence, delay, not enforcing this license,
+       accepting a donation or payment, merging your code, replying to a
+       message, or any statement that is not signed. Written Permission
+       covers only what it says, only for the party it names, and cannot
+       be transferred unless it says so.
+
+5. Credit (Attribution)
+
+   Every Covered Work you share, publish, or run for others must:
+     (a) keep this license file and the copyright notice above with the
+         source code, unchanged;
+     (b) show this notice where users can easily see it (for example, on
+         an "About" or "Credits" screen, or the page footer):
+         "Based on MoneyQuest by merrickfluellen
+          (https://github.com/merrickfluellen), used under the MoneyQuest
+          Source-Available License."; and
+     (c) say clearly that you changed the work, if you did.
+   You must not remove or hide any copyright or license notice, and you
+   must not suggest that the Licensor made, supports, or endorses your work.
+
+6. No Sublicensing; Passing It On
+
+   You may not sublicense, sell, or transfer any rights under this license,
+   or share a Covered Work under different or extra terms that give people
+   more rights than this license does. Everyone who gets a Covered Work
+   gets their permission directly from the Licensor under this license, and
+   you must pass this license along with it.
+
+7. AI and Machine Learning
+
+   (a) Using the Original Work to train, fine-tune, or evaluate an AI or
+       machine learning model, or putting it into a dataset or retrieval
+       system for one, uses the entire Original Work. You may do this only
+       for non-commercial purposes, unless you have Written Permission.
+   (b) Any output from an AI tool that copies or is substantially similar
+       to the Original Work counts toward the Used Portion, just as if you
+       had copied it yourself.
+
+8. Rewrites and Content
+
+   Rewriting, "clean room" re-creation, or paraphrasing does not avoid this
+   license if the new work is based on the Original Work's code, lesson or
+   quiz text, game rules, scenarios, data, numbers, or structure. Those
+   parts count toward the Used Portion. Ideas and facts that you learned
+   on your own from other sources do not count.
+
+9. Names, Branding, and Patents
+
+   (a) This license gives no right to use the names "MoneyQuest",
+       "InvestEd Pro", the Licensor's name, or any logo, or anything
+       confusingly similar, except to give the credit required in Section
+       5. You may not use them to name or market your work.
+   (b) If the Licensor has any patent rights covering the Original Work,
+       you may use them only as needed for uses this license allows. No
+       other patent rights are granted.
+   (c) Any right not clearly granted in this license is kept by the
+       Licensor. No right is granted by implication or by conduct.
+
+10. Ending This License
+
+   (a) If you break any term of this license, all of your permissions end
+       automatically and immediately. You must then stop using and sharing
+       every Covered Work.
+   (b) Fixing a credit mistake: if your only violation was of Section 5,
+       and you fix it within 30 days after you learn about it, your
+       permissions come back. This can happen only once.
+   (c) For any other violation, your permissions come back only if the
+       Licensor gives you Written Permission saying so.
+   (d) Ending or getting back permission does not cancel what you owe for
+       past violations. The Licensor may use every remedy the law allows,
+       including court orders to stop you, damages, and your profits from
+       the unauthorized use.
+
+11. No Warranty; Limit of Liability
 
    THE ORIGINAL WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED. IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY
-   CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE ORIGINAL WORK OR
-   ITS USE.
+   EXPRESS OR IMPLIED, INCLUDING ANY WARRANTY OF MERCHANTABILITY, FITNESS
+   FOR A PARTICULAR PURPOSE, ACCURACY, OR NON-INFRINGEMENT. MONEYQUEST IS
+   FOR EDUCATION ONLY AND IS NOT FINANCIAL, INVESTMENT, TAX, OR LEGAL
+   ADVICE. TO THE FULLEST EXTENT THE LAW ALLOWS, THE LICENSOR IS NOT LIABLE
+   FOR ANY DAMAGES OR LOSSES OF ANY KIND ARISING FROM THE ORIGINAL WORK OR
+   ANY USE OF IT. You are responsible for your own use, and for any
+   Covered Work you share or run for others.
 
-7. Commercial Licensing
+12. Legal Terms
 
-   To request permission for Commercial Use beyond what this license
-   allows, contact the Licensor through https://github.com/merrickfluellen.
+   (a) Governing law: This license is governed by the laws of the United
+       States and the state in which the Licensor resides, without regard
+       to conflict-of-law rules. Any lawsuit about it must be brought in
+       the state or federal courts located in the state where the Licensor
+       resides when the lawsuit is filed. However, the Licensor may ask
+       any court that has the power to hear it for an order to stop a
+       violation.
+   (b) Contract and copyright: By using the Original Work you agree to this
+       license. It is both a copyright license and a contract.
+   (c) Severability: If a court finds any part of this license
+       unenforceable, that part is changed only as much as needed to make
+       it enforceable, and the rest stays in effect. If a court will not
+       enforce the limits on Commercial Use against you, then you receive
+       no permission under this license for Commercial Use.
+   (d) Survival: Every term of this license, except the permissions given
+       in Sections 3 and 4(b), keeps applying after your permissions end.
+   (e) Waiver: If the Licensor does not enforce a term, that is not a
+       waiver of it. A waiver counts only if given as Written Permission.
+   (f) New versions: The Licensor may publish new versions of this license.
+       Each version of the Original Work is covered by the license version
+       that comes with it.
+   (g) Whole agreement: This license, plus any Written Permission you have,
+       is the whole agreement about the Original Work. Section headings are
+       only for convenience.
+
+13. Asking for Commercial Permission
+
+   To ask for Written Permission for Commercial Use, contact the Licensor
+   through https://github.com/merrickfluellen.
