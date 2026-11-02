@@ -310,6 +310,16 @@ function throttled(key, max, windowMs) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+/**
+ * True only if the request declares Content-Type: application/json (parameters such as
+ * charset allowed). Browsers cannot send this cross-site without a CORS preflight, so
+ * requiring it stops "simple" text/plain / form posts from other sites.
+ */
+function isJsonRequest(event) {
+  const ct = String(header(event, 'content-type') || '');
+  return /^\s*application\/json\s*(;|$)/i.test(ct);
+}
+
 module.exports = {
   deriveKey,
   safeEqual,
@@ -332,6 +342,7 @@ module.exports = {
   clientIp,
   throttled,
   sleep,
+  isJsonRequest,
 };
 
 // CLI: node lib/crypto.js hash '<prefix::value>'  → prints a scrypt hash for an env var
