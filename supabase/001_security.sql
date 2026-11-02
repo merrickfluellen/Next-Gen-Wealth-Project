@@ -52,6 +52,24 @@ begin
   end if;
 end $$;
 
+-- A4b. Password reset tracking (durable 5-guess limit and per-email cap).
+--      Server-only: RLS on, no anon/authenticated access.
+create table if not exists public.password_resets (
+  id text primary key,
+  email text not null,
+  attempts int not null default 0,
+  used boolean not null default false,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists password_resets_email_created
+  on public.password_resets (email, created_at desc);
+alter table public.password_resets enable row level security;
+revoke all on table public.password_resets from anon, authenticated, public;
+grant all on table public.password_resets to service_role;
+-- Optional cleanup (run daily, e.g. with pg_cron):
+--   delete from public.password_resets where created_at < now() - interval '2 days';
+
 -- A5. Look for duplicate / non-normalised emails BEFORE running Part B.
 --     Both queries should return no rows. If they do, see "Duplicates" in README.md.
 select 'users' as tbl, lower(btrim(email)) as email, count(*) as n

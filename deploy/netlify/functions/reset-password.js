@@ -15,7 +15,8 @@
  *   - encryption makes decoy tokens for unknown emails indistinguishable from real ones.
  *
  * Durable state (table public.password_resets, see SQL below): one row per issued code, keyed by
- * the nonce, holding `attempts` and `used`. confirm-reset claims an attempt slot with a
+ * the nonce, holding `attempts` and `used` (unknown emails get a row too, so confirm-reset cannot be
+ * used to tell real accounts from decoys). confirm-reset claims an attempt slot with a
  * compare-and-swap BEFORE checking the code, so a code can be guessed at most 5 times in total,
  * across every function instance and IP. Issuing a new code retires the older ones for that
  * email, and at most 3 codes per email per hour are emailed (anti email-bombing).
@@ -34,7 +35,7 @@
  *   alter table public.password_resets enable row level security;
  *   revoke all on table public.password_resets from anon, authenticated, public;
  *   grant  all on table public.password_resets to service_role;
- *   -- optional housekeeping: delete from public.password_resets where created_at < now() - interval '2 days';
+ *   -- housekeeping (e.g. daily; unknown emails also create rows): delete from public.password_resets where created_at < now() - interval '2 days';
  *
  * No user enumeration: unknown email, rate-limited, mail-provider failure and success all return
  * the same body (with a decoy token where needed) and are padded to the same minimum time.
@@ -81,24 +82,40 @@ function makeVerifyToken(email, code, pwHash, nonce = C.randomToken(16), expiry 
 
 /** Display name for the email: bounded, no control chars, HTML-escaped. */
 function safeName(name) {
-  const n = String(name || '').replace(/[\p{Cc}\p{Cf}  ]/gu, '').replace(/\s+/g, ' ').trim();
+  const n = String(name || '').replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '').replace(/\s+/g, ' ').trim();
   return escapeHtml([...(n || 'there')].slice(0, 40).join(''));
 }
 
-/** Records a new code in password_resets. Returns 'ok' | 'limited' | 'missing' | 'error'. */
+/**
+ * Records a new code in password_resets — for real AND unknown emails alike, so confirm-reset
+ * behaves identically for both (no enumeration oracle). Returns 'ok' | 'limited' | 'missing' | 'error'.
+ * The per-email cap is race-safe: after inserting, only the first PER_EMAIL_PER_HOUR rows of the
+ * last hour (by created_at, id) are allowed; a row that lost the race is retired immediately.
+ */
 async function recordReset(email, nonce, expiry) {
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const recent = await S.supa('GET', `password_resets?email=eq.${S.q(email)}&created_at=gte.${S.q(since)}&select=id&limit=${PER_EMAIL_PER_HOUR}`);
+  const windowQ = `password_resets?email=eq.${S.q(email)}&created_at=gte.${S.q(since)}&select=id` +
+    `&order=created_at.asc,id.asc&limit=${PER_EMAIL_PER_HOUR}`;
+  const recent = await S.supa('GET', windowQ);
   if (storeMissing(recent)) return 'missing';
   if (!S.ok2xx(recent)) return 'error';
   if (S.rows(recent).length >= PER_EMAIL_PER_HOUR) return 'limited';
-  // Retire every older open code for this email (only the newest code works).
-  const retire = await S.supa('PATCH', `password_resets?email=eq.${S.q(email)}&used=is.false`,
-    { body: { used: true }, prefer: 'return=minimal' });
-  if (!S.ok2xx(retire)) return 'error';
+
+  const createdAt = new Date().toISOString();
   const ins = await S.supa('POST', 'password_resets',
-    { body: { id: nonce, email, attempts: 0, used: false, expires_at: new Date(expiry).toISOString() }, prefer: 'return=minimal' });
-  return S.ok2xx(ins) ? 'ok' : 'error';
+    { body: { id: nonce, email, attempts: 0, used: false, expires_at: new Date(expiry).toISOString(), created_at: createdAt }, prefer: 'return=minimal' });
+  if (!S.ok2xx(ins)) return 'error';
+
+  const first = await S.supa('GET', windowQ);
+  if (!S.ok2xx(first) || !S.rows(first).some((r) => r && r.id === nonce)) {
+    await S.supa('PATCH', `password_resets?id=eq.${S.q(nonce)}`, { body: { used: true }, prefer: 'return=minimal' });
+    return S.ok2xx(first) ? 'limited' : 'error';
+  }
+  // Retire every OLDER open code for this email (only the newest code works).
+  const retire = await S.supa('PATCH', `password_resets?email=eq.${S.q(email)}&used=is.false&created_at=lt.${S.q(createdAt)}`,
+    { body: { used: true }, prefer: 'return=minimal' });
+  if (!S.ok2xx(retire)) console.error('reset-password: could not retire older codes');
+  return 'ok';
 }
 
 async function sendEmail(email, userName, code) {
@@ -170,12 +187,15 @@ async function resetPassword(event) {
   if (C.throttled('reset:email:' + email, PER_EMAIL_PER_HOUR, 60 * 60 * 1000)) return decoy();
 
   const g = await S.getUser(email, 'email,name,pw_hash');
-  if (g.error || !g.user) return decoy();   // never reveal whether the email exists
+  if (g.error === 'db') return decoy();
+  const user = g.error ? null : g.user;   // duplicate rows are treated like an unknown email
 
   const code   = C.randomDigits(6);
   const nonce  = C.randomToken(16);
   const expiry = Date.now() + CODE_TTL_MS;
 
+  // A row is recorded for unknown emails too (with a decoy token), so every later answer from
+  // confirm-reset is the same whether or not the account exists.
   const rec = await recordReset(email, nonce, expiry);
   if (rec === 'missing') {
     console.error('reset-password: table public.password_resets is missing — using per-instance limits only. Create it (SQL in reset-password.js).');
@@ -183,13 +203,14 @@ async function resetPassword(event) {
     if (rec === 'error') console.error('reset-password: could not record the reset code');
     return decoy();   // no email sent; same response as everything else
   }
+  if (!user) return finish({ ok: true, verifyToken: makeVerifyToken(email, null, null, nonce, expiry) });
 
-  const status = await sendEmail(email, safeName(g.user.name), code);
+  const status = await sendEmail(email, safeName(user.name), code);
   if (status < 200 || status >= 300) {
     // Logged for the owner; NOT surfaced to the client (a distinct error would reveal the account exists).
     console.error('reset-password: Resend API returned status', status);
   }
-  return finish({ ok: true, verifyToken: makeVerifyToken(email, code, g.user.pw_hash, nonce, expiry) });
+  return finish({ ok: true, verifyToken: makeVerifyToken(email, code, user.pw_hash, nonce, expiry) });
 }
 
 exports.handler = withFirewall(resetPassword, {
