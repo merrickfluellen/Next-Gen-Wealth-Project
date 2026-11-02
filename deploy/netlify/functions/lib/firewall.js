@@ -54,7 +54,9 @@ const ATTACK_PATTERNS = [
   /\bjavascript\s*:/i,
   /(\.\.\/|\.\.\\|%2e%2e%2f|%2e%2e\/|\.\.%2f)/i, // path traversal
   /\/etc\/(passwd|shadow)|\bwin\.ini\b/i,
-  /\bunion(\s|\/\*.*?\*\/)+(all\s+)?select\b/i,  // SQL injection
+  // SQL injection. The comment branch can never contain "*/", so each input has
+  // exactly one parse; the old /\*.*?\*/ form backtracked exponentially (ReDoS).
+  /\bunion(?:\s|\/\*[^*]*\*+(?:[^\/*][^*]*\*+)*\/)+(?:all\s+)?select\b/i,
   /'\s*or\s+'?\d+'?\s*=\s*'?\d+/i,
   /;\s*(drop|truncate)\s+table\b/i,
   /\b(sleep|benchmark|pg_sleep)\s*\(\s*\d+/i,
