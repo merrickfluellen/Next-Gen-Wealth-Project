@@ -14,7 +14,8 @@
  *   409 { error, code:'wrong_user' }    X-Expected-User names a different account
  *   415 { error }                       not application/json
  *   429 { error }                       rate limited (5 per hour per IP, durable)
- *   503 { error }                       database unavailable / delete_account missing. The deletion is
+ *   503 { error, code? }                database unavailable, or delete_account missing
+ *                                       (code:'db_not_migrated': SQL Part A not run). The deletion is
  *                                       one transaction, so the account is either fully deleted or
  *                                       untouched; the client may retry (a retry after a deletion that
  *                                       did commit gets 401)
@@ -51,8 +52,11 @@ async function authDelete(event) {
 
   const r = await S.rpc('delete_account', { p_email: a.email });
   if (!S.ok2xx(r)) {
-    if (r.status === 404) console.error('auth-delete: delete_account not found — run supabase/001_security.sql Part A');
-    else console.error('auth-delete: delete_account failed', r.status, r.error && r.error.code);
+    if (r.status === 404 || (r.error && (r.error.code === 'PGRST202' || r.error.code === '42883'))) {
+      console.error('auth-delete: *** DATABASE NOT MIGRATED *** public.delete_account does not exist. ' +
+        'Account deletion is impossible until supabase/001_security.sql Part A is run (see supabase/README.md step 2).');
+      return S.json(503, { error: "We couldn't delete your account right now. Please try again later.", code: 'db_not_migrated' });
+    } console.error('auth-delete: delete_account failed', r.status, r.error && r.error.code);
     return S.json(503, { error: "We couldn't delete your account right now. Please try again in a minute." });
   }
   return S.json(200, { ok: true });

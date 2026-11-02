@@ -9,13 +9,15 @@
  *   503 { error }                                   server misconfigured / database unavailable
  *
  * Lockout (durable, shared by every instance via lib/ratelimit.js; IPv6 counted per /64):
- *   10 failures per email and 30 failures per IP in a 15-minute window. Only failures are counted,
- *   but once a limit is reached EVERY attempt for that email / from that IP is refused before the
- *   password is checked, so a correct guess looks exactly like a wrong one (no success oracle).
- *   Successful sign-ins never count as failures, so a classroom behind one school IP is not locked
- *   out by correct logins. Separately, at most 20 attempts (right or wrong) per email per 15 minutes
- *   are accepted, counted atomically before the check, so parallel bursts cannot outrun the lockout.
- *   The firewall caps all requests at 120 per IP per 10 minutes (durable).
+ *   - per email: 10 failures per 15 minutes. Checked BEFORE the password: once reached, every attempt
+ *     for that email is refused, right or wrong (no success oracle). In addition at most 20 attempts
+ *     per email per 15 minutes are accepted, counted atomically before the check, so a burst of
+ *     parallel guesses cannot outrun the failure count.
+ *   - per IP: 100 failures per 15 minutes. Applied only to FAILED attempts (they get 429 instead of
+ *     401), never to a correct password — a whole class signs in from one school IP, and one
+ *     student's typos must not lock the others out. Password spraying from one IP is bounded by the
+ *     firewall's 120 requests per 10 minutes (durable) and by the per-email limits.
+ *   Successful sign-ins never count as failures.
  *
  * pw_hash may be the legacy 32-bit djb2 hash (written by the old browser client and by older
  * versions of confirm-reset) or a scrypt hash. A successful legacy login transparently rewrites
@@ -34,7 +36,7 @@ const MIN_MS = 450;                 // every failure / lockout takes at least th
 const BAD = 'Incorrect email or password.';
 const WINDOW = 15 * 60;
 const LIM_EMAIL = { windowSec: WINDOW, max: 10 };
-const LIM_IP = { windowSec: WINDOW, max: 30 };
+const LIM_IP = { windowSec: WINDOW, max: 100 };
 // Every attempt (right or wrong) per email, counted atomically BEFORE the check: bounds a burst of
 // parallel guesses that would all pass the failure peek() before any of them is recorded.
 const LIM_EMAIL_TRIES = { windowSec: WINDOW, max: 20 };
@@ -53,29 +55,28 @@ async function login(event) {
   const password = typeof b.password === 'string' && b.password.length <= S.PW_MAX ? b.password : '';
   const ip = RL.ipKey(event.headers);
 
+  const locked = (wait) => S.json(429, { error: 'Too many failed attempts. Please wait 15 minutes and try again.' }, { 'Retry-After': String(wait || WINDOW) });
   const fail = async () => {
-    await Promise.all([
+    const [ipHit] = await Promise.all([
       RL.hit('login-fail-ip', ip, LIM_IP),
       email ? RL.hit('login-fail-email', email, LIM_EMAIL) : null,
     ]);
     await S.padTo(started, MIN_MS);
-    return S.json(401, { error: BAD });
+    return ipHit.ok ? S.json(401, { error: BAD }) : locked(ipHit.retryAfter);
   };
 
   if (!email || !password || !S.pwForLegacy(password)) { C.verifySecret('x', dummy()); return fail(); }
 
   // Lockout check and user lookup in parallel (same latency for every outcome).
-  const [ipState, emailState, tries, g] = await Promise.all([
-    RL.peek('login-fail-ip', ip, LIM_IP),
+  const [emailState, tries, g] = await Promise.all([
     RL.peek('login-fail-email', email, LIM_EMAIL),
     RL.hit('login-try-email', email, LIM_EMAIL_TRIES),
     S.getUser(email),
   ]);
-  if (!ipState.ok || !emailState.ok || !tries.ok) {
+  if (!emailState.ok || !tries.ok) {
     C.verifySecret(S.pwForScrypt(password), dummy());          // same work as a real check
     await S.padTo(started, MIN_MS);
-    const wait = Math.max(ipState.retryAfter || 0, emailState.retryAfter || 0, tries.retryAfter || 0) || WINDOW;
-    return S.json(429, { error: 'Too many failed attempts. Please wait 15 minutes and try again.' }, { 'Retry-After': String(wait) });
+    return locked(Math.max(emailState.retryAfter || 0, tries.retryAfter || 0));
   }
   if (g.error === 'db') { await S.padTo(started, MIN_MS); return S.json(503, { error: 'Sign-in is unavailable right now. Please try again in a minute.' }); }
   const user = g.user;   // a duplicate-rows error is treated as "no such user"
@@ -111,7 +112,7 @@ exports.handler = withFirewall(login, {
   name: 'auth-login',
   methods: ['POST'],
   // Generous per-IP request cap (a whole class can sign in from one school IP); failed attempts
-  // are limited much harder above (10 per email / 30 per IP per 15 min, durable).
+  // are limited much harder above (per email, durable; see header).
   rateLimit: { windowMs: 10 * 60 * 1000, max: 120 },
   durable: true,
   maxBodyBytes: 1024,

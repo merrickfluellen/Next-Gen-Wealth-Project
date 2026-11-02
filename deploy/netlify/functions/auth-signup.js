@@ -14,7 +14,8 @@
  *                                          unused code; counted against the per-IP failure budget
  *                                          and a per-code budget, so one code cannot probe many emails)
  *   429 { error }                  rate limited
- *   503 { error }                  server misconfigured / database unavailable. Never retried and
+ *   503 { error, code? }           server misconfigured / database unavailable (code:'db_not_migrated'
+ *                                  when supabase/001_security.sql Part A has not been run). Never retried and
  *                                  never rolled back: if the database committed, the account exists
  *                                  and the code is spent (sign in); if not, the code is still unused.
  *
@@ -152,8 +153,11 @@ async function signup(event) {
     console.error('auth-signup: create_user_with_code rejected its input', r.error && r.error.code);
     return S.json(400, { error: 'Please check your details and try again.' });
   }
-  if (r.status === 404) console.error('auth-signup: create_user_with_code not found — run supabase/001_security.sql Part A');
-  else console.error('auth-signup: create_user_with_code failed', r.status, r.error && r.error.code, status ? 'unexpected ' + status : '');
+  if (r.status === 404 || (r.error && (r.error.code === 'PGRST202' || r.error.code === '42883'))) {
+    console.error('auth-signup: *** DATABASE NOT MIGRATED *** public.create_user_with_code does not exist. ' +
+      'Nobody can sign up until supabase/001_security.sql Part A is run (see supabase/README.md step 2).');
+    return S.json(503, { error: MSG.down, code: 'db_not_migrated' });
+  } console.error('auth-signup: create_user_with_code failed', r.status, r.error && r.error.code, status ? 'unexpected ' + status : '');
   return S.json(503, { error: MSG.down });
 }
 
