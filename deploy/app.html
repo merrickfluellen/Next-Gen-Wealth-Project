@@ -1835,6 +1835,7 @@ window.MQW = window.MQW || {};
 
     // ── buildings ──
     const buildBuilding = (grp, b, dyn) => {
+      if (!b.wall || !b.roof) b = Object.assign({}, b, { wall: b.wall || '#E8D9C0', roof: b.roof || '#9C4A3C' });   // a building without colors rendered white (THREE warning)
       const floors = b.floors || FLOORS[b.style] || 2, H = b.style === 'house' ? floors * 38 : floors * FLOOR;
       const cx = b.x + b.w / 2, cz = b.y + b.h / 2, front = b.y + b.h, seed = hashStr(b.id) % 99991 + 1;
       const classical = ['exchange', 'bank', 'academy', 'cityhall'].includes(b.style);
@@ -3000,6 +3001,7 @@ const apiCall = async (fn, { method = 'GET', body, token, auth = true, timeoutMs
 };
 const fmtWait = (s) => !s ? 'a few minutes' : s < 60 ? s + ' seconds' : Math.ceil(s / 60) + (Math.ceil(s / 60) === 1 ? ' minute' : ' minutes');
 const MSG_OFFLINE = "We couldn't reach the Money Quest server. Check your internet connection and try again.";
+const MSG_FORBIDDEN = 'This page could not reach the Money Quest server. Please open the app from https://nextgenwealthproject.netlify.app/app.html and try again.';
 const MSG_DOWN = 'Our server is having trouble right now. Please try again in a minute.';
 // Friendly text for a failed apiCall. Server messages are shown only for 4xx (they are written to be user-safe).
 const apiErrorText = (r, fallback) => {
@@ -3242,8 +3244,10 @@ const restoreExtras = (email, extras) => {
 };
 // Write a freshly loaded cloud row into this device's cache (used at sign-in, when the device has just been
 // cleared). Everything is re-validated by the same loaders the app uses for localStorage (finNum/lsList/kqMerge…).
-const applyProgressToLocal = (email, p) => {
+// `keep`: columns this device changed but never got into the cloud (cloudUnsynced): the device copy wins for those.
+const applyProgressToLocal = (email, p, keep) => {
   if (!p || typeof p !== 'object') return;
+  if (keep && keep.size) { p = { ...p }; keep.forEach(c => { delete p[c]; }); }
   const k = (n) => n + '::' + email;
   const obj = (v) => v && typeof v === 'object' && !Array.isArray(v);
   if (Array.isArray(p.completed_lessons)) lsSet(k('completedLessons'), JSON.stringify(p.completed_lessons.filter(x => typeof x === 'number' || typeof x === 'string')));
@@ -3268,6 +3272,8 @@ const applyProgressToLocal = (email, p) => {
     if (at > localAt) {
       [['bank', 'bank'], ['loans', 'loans'], ['myBonds', 'myBonds'], ['econ', 'econ'], ['market', 'market']].forEach(([c, n]) => { if (ec[c] != null) lsSet(k(n), JSON.stringify(ec[c])); });
       lsSet(k('econSavedAt'), String(at));
+      // the cloud copy is newer: its extras (rent clock, wholesale list, license…) replace this device's
+      if (ec.extras && typeof ec.extras === 'object' && !Array.isArray(ec.extras)) EXTRA_KEYS.forEach(n => { const v = ec.extras[n]; if (typeof v === 'string' && v.length <= 32768) lsSet(k(n), v); });
     }
     restoreExtras(email, ec.extras);
   }
@@ -4747,14 +4753,15 @@ try {
     }
     if (r.status === 409 && r.data.reason === 'code_used') setError('This access code has already been used. Each code creates one account.');
     else if (r.status === 409) setError('An account with this email already exists. Sign in instead.');
-    else if (r.status === 403) setError('That access code is not valid. Check it for typos, or purchase a code to create an account.');
+    else if (r.status === 403 && r.data.field === 'code') setError('That access code is not valid. Check it for typos, or purchase a code to create an account.');
+    else if (r.status === 403) setError(MSG_FORBIDDEN);   // the firewall (wrong site address / origin), not the code
     else setError(apiErrorText(r, "We couldn't create your account. Please check your details and try again."));
     return;
   }
   const r = await apiCall('auth-login', { method: 'POST', auth: false, body: { email: em, password } });
   const u = r.status === 200 ? userFromApi(r.data.user) : null;
   if (!u || !TOKEN_RE.test(r.data.token || '')) {
-    setError(r.status === 401 ? 'Incorrect email or password.' : r.status === 200 ? MSG_DOWN : apiErrorText(r, 'Sign-in failed. Please try again.'));
+    setError(r.status === 401 ? 'Incorrect email or password.' : r.status === 200 ? MSG_DOWN : r.status === 403 && !r.data.field ? MSG_FORBIDDEN : apiErrorText(r, 'Sign-in failed. Please try again.'));
     return;
   }
   // Load the cloud copy before the app opens. If that fails, stop: opening with an empty device would
@@ -7593,11 +7600,12 @@ const CityWorld = ({ storeKey, cloudSave, cloudLoad, track, ticker, cash, netWor
     )
   );
 };
-const FinanceEd = ({ user, onSignOut, onDeleteData }) => {
+const FinanceEd = ({ user, onSignOut, onDeleteData, onTrackChange }) => {
 const k = (name) => name + '::' + user.email;
 useState(() => { if (!user.practice) reMigrateLocalHomes(user.email); return 0; });   // runs once, before the loaders below
 const [selectedLesson, setSelectedLesson] = useState(null);
 const [lessonNotes, setLessonNotes] = useState(() => lsJSON(k('lessonNotes'), '{}'));
+const [noteDraft, setNoteDraft] = useState({ id: '', text: '' });   // Library → Notes editor
 const [completedLessons, setCompletedLessons] = useState(() => { const v = lsJSON(k('completedLessons'), '[]'); return Array.isArray(v) ? [...new Set(v.filter(x => typeof x === 'number' || typeof x === 'string'))] : []; });
 const [searchDict, setSearchDict] = useState('');
 const [daysElapsed, setDaysElapsed] = useState(() => lsDays(k('simDays')));
@@ -7752,6 +7760,7 @@ const dismissPatchNote = () => {
 const [mainTab, _setMainTab] = useState(() => cityView === 'world' ? 'world' : 'quest');   // 'world' = walking around Money City
 const [libTab, setLibTab] = useState('words');
 const [kqTrack, setKqTrack] = useState(null);
+useEffect(() => { if (onTrackChange) onTrackChange(kqTrack); }, [kqTrack]);   // App waits for a track before the tutorial
 // Sub-tab state for Portfolio / My Properties lives here (those panels are plain render functions, so it survives re-renders)
 const [pTab, setPTab] = useState('overview');
 const [mpSub, setMpSub] = useState('myprops');   // 'junior' | 'pro' | null — reported up by KidQuest
@@ -10468,15 +10477,35 @@ return { lessonId, content, lesson };
 }).filter(n => n.content && n.lesson);
 return e('div', { className: 'container', style: { paddingTop: '24px' } },
 e('p', { style: { color: 'var(--text-secondary)', fontSize: 12, marginBottom: 12 } }, '🔒 Notes save to your account. Please don\'t type personal info (phone, address, school) in them.'),
+// Note editor: pick a Pro lesson, write, save (one note per lesson; saving an empty note deletes it)
+(() => {
+  const all = curriculum.flatMap(u => u.lessons);
+  const save = () => {
+    const id = noteDraft.id; if (!id) return;
+    const text = noteDraft.text.slice(0, 2000).trim();
+    setLessonNotes(prev => { const n = { ...prev }; if (text) n[id] = text; else delete n[id]; return n; });
+    setNoteDraft({ id: '', text: '' });
+  };
+  return e('div', { className: 'card', style: { padding: 16, marginBottom: 16 } },
+    e('label', { className: 'field-label', htmlFor: 'note-lesson' }, 'Write a note for a lesson'),
+    e('select', { id: 'note-lesson', className: 'input-field', value: noteDraft.id, onChange: (ev) => { const id = ev.target.value; setNoteDraft({ id, text: id && lessonNotes[id] ? String(lessonNotes[id]) : '' }); } },
+      e('option', { value: '' }, 'Choose a lesson'),
+      ...all.map(l => e('option', { key: l.id, value: String(l.id) }, l.title))),
+    !!noteDraft.id && e('textarea', { className: 'input-field', rows: 4, maxLength: 2000, value: noteDraft.text, 'aria-label': 'Note text', placeholder: 'What do you want to remember from this lesson?', onChange: (ev) => setNoteDraft({ id: noteDraft.id, text: ev.target.value }), style: { width: '100%', resize: 'vertical' } }),
+    !!noteDraft.id && e('div', { style: { display: 'flex', gap: 8, marginTop: 8 } },
+      e('button', { type: 'button', className: 'btn btn-primary', onClick: save }, noteDraft.text.trim() ? 'Save note' : 'Delete note'),
+      e('button', { type: 'button', className: 'btn-ghost', onClick: () => setNoteDraft({ id: '', text: '' }) }, 'Cancel')));
+})(),
 notesArray.length === 0 ? e('div', { className: 'card', style: { textAlign: 'center', padding: '40px' } },
-e('p', { style: { color: 'var(--text-secondary)' } }, 'No notes yet. Start taking notes in lessons to see them here.')
+e('p', { style: { color: 'var(--text-secondary)' } }, 'No notes yet. Pick a lesson above and write your first note.')
 ) : e('div', {},
 ...notesArray.map(note => e('div', { key: note.lessonId, className: 'note-item' },
 e('div', { className: 'note-header' },
 e('div', {},
 e('h3', { style: { color: 'var(--text-primary)', marginBottom: '4px' } }, note.lesson.title),
 e('div', { className: 'note-unit' }, note.lesson.id)
-)
+),
+e('button', { type: 'button', className: 'btn-ghost', style: { fontSize: 12, padding: '4px 10px' }, onClick: () => setNoteDraft({ id: String(note.lessonId), text: String(note.content) }) }, 'Edit')
 ),
 e('div', { className: 'note-content' }, note.content)
 ))
@@ -11029,6 +11058,7 @@ const [user, setUser] = useState(() => _previewMode ? { name: 'Preview User', em
 const [booting, setBooting] = useState(() => !_previewMode && !!getToken());
 const [authNotice, setAuthNotice] = useState('');
 const [showTutorial, setShowTutorial] = useState(false);
+const [hasTrack, setHasTrack] = useState(false);   // the onboarding tutorial waits until the "Who's playing?" picker is done
 const [isAdmin, setIsAdmin] = useState(false);
 const userRef = React.useRef(null);
 useEffect(() => { userRef.current = user; if (user && !user.practice && !_previewMode) { Cloud.begin(user.email); TabGuard.claim(user.email); } }, [user]);
@@ -11063,7 +11093,18 @@ useEffect(() => {
       const cached = getSession();
       if (!cached || cached.email !== u.email) clearLocalUserData();   // the device cache belonged to someone else
       setToken(r.data.token && TOKEN_RE.test(r.data.token) ? r.data.token : token);   // keep (or refresh) the session
-      purgeLegacyData(); clearOtherUsersData(u.email); setSession(u); Cloud.begin(u.email); TabGuard.claim(u.email); setUser(u); setBooting(false);
+      purgeLegacyData(); clearOtherUsersData(u.email); setSession(u); Cloud.begin(u.email); TabGuard.claim(u.email);
+      // Another device may have saved since this one last ran: load the cloud row into this device's cache BEFORE the
+      // app opens, so stale local state never overwrites newer cloud progress. Columns this device changed but could
+      // not sync (offline, tab closed) keep the device copy and are re-sent. If the row can't be loaded, the device
+      // copy opens as before (saves wait in the queue).
+      const pr = await Cloud.loadAll(true);
+      if (!alive) return;
+      if (pr.ok && pr.progress) {
+        const keep = new Set(PROGRESS_COLS.filter(c => Cloud.isUnsynced(c)));
+        applyProgressToLocal(u.email, pr.progress, keep);
+      }
+      setUser(u); setBooting(false);
       return;
     }
     if (r.status === 401 || r.status === 200 || r.status === 400 || r.status === 403) { clearLocalUserData(); purgeLegacyData(); setBooting(false); return; }
@@ -11115,7 +11156,11 @@ const deleteMyData = async () => {
   }
   Cloud.hold(false);
   if (r.status === 401) { endSession('Your session has ended. Please sign in again, then try deleting your data again.'); return; }
-  alert('Your data was NOT deleted. ' + apiErrorText(r, "We couldn't delete your account right now.") + '\n\nPlease try again later, or ask a parent or guardian to contact us (see "How parents can review or delete data" in the Privacy Policy).');
+  // The server copy could not be deleted. The device copy can still be removed, but say clearly what was NOT deleted.
+  if (window.confirm('Your account was NOT deleted. ' + apiErrorText(r, "We couldn't delete your account right now.") + '\n\nYour account and the copy saved on our server are still there. Try again later, or ask a parent or guardian to contact us (see "How parents can review or delete data" in the Privacy Policy).\n\nDo you want to remove your data from THIS device and sign out anyway?')) {
+    TabGuard.release();
+    wipeAndShowAuth('Your data was removed from this device. Your account and the copy on our server were NOT deleted.');
+  }
 };
 const handleAuth = (u) => {
 // New players get the tutorial only; "What's New" is for people who used an older version
@@ -11135,8 +11180,8 @@ if (frozen) return e('div', { className: 'auth-wrap', role: 'alert' },
     e('button', { type: 'button', className: 'btn btn-primary', style: { marginTop: 12 }, onClick: () => window.location.reload() }, frozen === 'tab' ? 'Play in this tab instead' : 'Reload')));
 if (booting) return e('div', { className: 'auth-wrap', role: 'status', 'aria-live': 'polite' }, e('div', { style: { textAlign: 'center', color: 'var(--text-secondary)', fontSize: 15 } }, e('div', { style: { fontSize: 44, marginBottom: 10 } }, '🐷'), 'Signing you in…'));
 return e('div', {},
-user ? e(FinanceEd, { key: user.email, user, onSignOut: signOut, onDeleteData: user.practice ? null : deleteMyData }) : e(AuthScreen, { key: authNotice, notice: authNotice, onAuth: handleAuth, onAdminAuth: () => setIsAdmin(true) }),
-showTutorial && user && e(OnboardingTutorial, { user, onComplete: () => setShowTutorial(false) })
+user ? e(FinanceEd, { key: user.email, user, onSignOut: signOut, onDeleteData: user.practice ? null : deleteMyData, onTrackChange: (t) => setHasTrack(!!t) }) : e(AuthScreen, { key: authNotice, notice: authNotice, onAuth: handleAuth, onAdminAuth: () => setIsAdmin(true) }),
+showTutorial && hasTrack && user && e(OnboardingTutorial, { user, onComplete: () => setShowTutorial(false) })
 );
 };
 const root = ReactDOM.createRoot(document.getElementById('root'));
