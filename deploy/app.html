@@ -7389,7 +7389,7 @@ const reFinishPurchase = (c) => {
 const [flipModal, setFlipModal] = useState(null);
 const [flipBudget, setFlipBudget] = useState('');
 const [wholesaleModal, setWholesaleModal] = useState(null);
-const [lastRentCollect, setLastRentCollect] = useState(() => parseInt(localStorage.getItem(k('lastRentCollect')) || String(Date.now())));
+const [lastRentCollect, setLastRentCollect] = useState(() => { const v = parseInt(localStorage.getItem(k('lastRentCollect')) || '', 10); return Number.isFinite(v) && v > 0 ? v : Date.now(); });   // a garbage value used to collect NaN rent and NaN the cash
 const [rentNow, setRentNow] = useState(() => Date.now());
 const todayKey = new Date().toISOString().slice(0,10);
 
@@ -7508,7 +7508,7 @@ useEffect(() => {
     if (cloud && typeof cloud === 'object' && Array.isArray(cloud.myProps) && (cloud.savedAt || 0) > localAt) {
       reSkipStamp.current = true;
       localStorage.setItem(k('reSavedAt'), String(cloud.savedAt || 0));
-      setMyProps(cloud.myProps);
+      setMyProps(cloud.myProps.filter(p => p && typeof p === 'object' && !Array.isArray(p)));
       setReTenants(cloud.reTenants && typeof cloud.reTenants === 'object' ? cloud.reTenants : {});
     } else if (localAt > 0 && (!cloud || (cloud.savedAt || 0) < localAt)) {
       dbSaveRealEstate(user.email, { myProps: lsJSON(k('myProps'), '[]'), reTenants: lsJSON(k('reTenants'), '{}'), savedAt: localAt });
@@ -9125,7 +9125,7 @@ e('p', { style: { fontSize: '11px', color: 'var(--text-secondary)', marginTop: '
         const currentPrice = calculateCurrentPrice(inv);
         const totalValue = currentPrice * inv.quantity;
         const gainLoss = totalValue - (inv.purchasePrice * inv.quantity);
-        const gainLossPercent = (gainLoss / (inv.purchasePrice * inv.quantity)) * 100;
+        const gainLossPercent = inv.purchasePrice * inv.quantity > 0 ? (gainLoss / (inv.purchasePrice * inv.quantity)) * 100 : 0;   // no NaN%/Infinity% on a $0 cost basis
         return e('div', { key: inv.id, className: 'portfolio-item' },
           e('div', { className: 'portfolio-header' },
             e('div', {},
@@ -10163,7 +10163,7 @@ e('p', { style: { color: 'var(--text-secondary)', fontSize: '13px' } }, inv.type
 ),
 e('div', { style: { textAlign: 'right' } },
 e('div', { className: 'portfolio-price' }, '$' + totalValue.toFixed(2)),
-e('div', { className: `portfolio-change ${gainLoss >= 0 ? 'positive' : 'negative'}` }, `${((gainLoss / (inv.purchasePrice * inv.quantity)) * 100).toFixed(1)}%`)
+e('div', { className: `portfolio-change ${gainLoss >= 0 ? 'positive' : 'negative'}` }, `${(inv.purchasePrice * inv.quantity > 0 ? (gainLoss / (inv.purchasePrice * inv.quantity)) * 100 : 0).toFixed(1)}%`)
 )
 )
 );

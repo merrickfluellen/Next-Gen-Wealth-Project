@@ -98,7 +98,7 @@ const STRICT_EMAIL_RE = /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`
 // Login: the old client accepted /^[^\s@]+@[^\s@]+\.[^\s@]+$/, so existing accounts may have
 // looser addresses. Exact-match lookup only; no control/format characters.
 const LOOSE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONTROL_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}  ]/u;
+const CONTROL_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\u2028\u2029]/u;
 
 /** trim + lowercase (exactly what the old client did). Returns '' if not a plausible email. */
 function normEmail(v, { strict = false } = {}) {
