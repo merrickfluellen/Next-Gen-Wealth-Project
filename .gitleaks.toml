@@ -4,14 +4,24 @@ title = "MoneyQuest gitleaks config"
 [extend]
 useDefault = true
 
+# The default rules have no Supabase secret-key rule; add one.
+# (Publishable keys, sb_publishable_..., are a different prefix and do not match.)
+[[rules]]
+id = "supabase-secret-key"
+description = "Supabase secret (service) API key"
+regex = '''sb_secret_[A-Za-z0-9_-]{20,}'''
+keywords = ["sb_secret_"]
+
 [allowlist]
 description = "Values that are public by design"
 regexes = [
-  # Supabase publishable (anon) key: shipped to the browser on purpose;
-  # data access is enforced by Row Level Security, not by hiding this key.
-  '''sb_publishable_[A-Za-z0-9_-]+''',
+  # Legacy: the Supabase publishable (anon) key was once shipped to the browser and is still in git
+  # history. The pages no longer use it (Supabase is only called server-side by the functions).
+  # It grants nothing beyond Row Level Security. Anchored so it only matches the whole key.
+  '''^sb_publishable_[A-Za-z0-9_-]+$''',
 ]
 paths = [
-  # Static real-estate reference data, not credentials.
-  '''deploy/netlify/functions/lib/re-data\.json''',
+  # Static real-estate reference data (ACS/FHFA numbers), not credentials.
+  # Anchored to this exact path so copies like re-data.json.bak are still scanned.
+  '''^deploy/netlify/functions/lib/re-data\.json$''',
 ]

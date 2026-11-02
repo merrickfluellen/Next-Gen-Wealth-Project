@@ -1,7 +1,30 @@
 version: 2
 updates:
-  # Keep the GitHub Actions used in .github/workflows up to date.
+  # Keep the GitHub Actions used in .github/workflows up to date (bumps the pinned SHA + version comment).
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+
+  # package.json: Tailwind (builds deploy/tailwind.css) and the libraries self-hosted in deploy/vendor/.
+  # A bump here does NOT change the site by itself: copy the new files into a new
+  # deploy/vendor/<pkg>@<version>/ folder, update deploy/vendor/README.md and the tags in app.html,
+  # or rerun `npm run build:css` for Tailwind.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    ignore:
+      # Stay on the UMD builds the app loads: React 19 has no UMD build and three r160+ has no three.min.js.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "three"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
