@@ -12,8 +12,12 @@
  *     outstanding session for that user. Rotating SESSION_SECRET revokes all sessions.
  *   - Admin token check (same rules as verify-admin.js).
  *
- * Env: SESSION_SECRET (required), SUPA_SERVICE_KEY (required), SUPABASE_URL (optional, defaults to
- * the project URL already used by app.html / reset-password.js).
+ *   - Signup consent record: CONSENT_VERSION (current Terms/Privacy version) and AGE_BANDS (the only
+ *     age bands an account may be created with — 13+ only; the under-13 screen never reaches the server).
+ *   - rpc(): call a Postgres function (supabase/001_security.sql) with the service key.
+ *
+ * Env: SESSION_SECRET (required, >= 32 chars), SUPA_SERVICE_KEY (required), SUPABASE_URL (optional,
+ * defaults to the project URL already used by app.html / reset-password.js).
  */
 'use strict';
 
@@ -25,6 +29,17 @@ const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;   // 30 days
 const SESSION_REFRESH_AFTER = 7 * 24 * 60 * 60;  // auth-session hands out a fresh token after 7 days
 const PW_MIN_NEW = 8, PW_MAX = 128;
 
+// ─── Consent / age ───────────────────────────────────────────────────────────
+/** Version of the Terms + Privacy Policy a new account agrees to. Must match app.html's consentVersion. */
+const CONSENT_VERSION = '2026-11-02';
+/**
+ * Age bands accepted at signup (app.html sends ageBand '13-17' or '18+'; under-13 is blocked in the
+ * browser and must never be stored). Also enforced by the users_age_band_check constraint in SQL.
+ */
+const AGE_BANDS = Object.freeze(['13-17', '18+']);
+/** Returns the band if allowed, else ''. */
+function normAgeBand(v) { return typeof v === 'string' && AGE_BANDS.includes(v) ? v : ''; }
+
 // ─── Supabase REST ───────────────────────────────────────────────────────────
 function supaBase() {
   const u = String(process.env.SUPABASE_URL || DEFAULT_SUPA_URL).replace(/\/+$/, '');
@@ -33,7 +48,7 @@ function supaBase() {
 }
 
 function configured() {
-  return !!(process.env.SUPA_SERVICE_KEY && process.env.SESSION_SECRET);
+  return !!(process.env.SUPA_SERVICE_KEY && C.secretConfigured());
 }
 
 /**
@@ -69,6 +84,16 @@ async function supa(method, path, { body, prefer, timeoutMs = 8000 } = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Call a Postgres function through PostgREST: POST /rest/v1/rpc/<fn> with named args.
+ * Same return shape as supa(). Scalar results arrive as JSON scalars (rl_hit → 3,
+ * create_user_with_code → "ok"); jsonb results as objects.
+ */
+function rpc(fn, args, opts = {}) {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(String(fn))) return Promise.resolve({ status: 0, data: null, error: { code: 'bad_rpc_name' } });
+  return supa('POST', 'rpc/' + fn, { ...opts, body: args || {} });
 }
 
 const ok2xx = (r) => r.status >= 200 && r.status < 300;
@@ -195,9 +220,13 @@ function adminCredentialVersion(env) {
 /** True only for a valid, unexpired admin-session token bound to the CURRENT admin credentials. */
 function isAdminToken(token) {
   const env = process.env;
-  if (!token || !env.SESSION_SECRET || !env.ADMIN_EMAIL_HASH || !env.ADMIN_PW_HASH || !env.ADMIN_CODE_HASH) return false;
-  const p = C.verify(token, { purpose: 'admin-session' });
-  return !!p && p.sub === 'admin' && typeof p.cv === 'string' && C.safeEqual(p.cv, adminCredentialVersion(env));
+  if (!token || !C.secretConfigured() || !env.ADMIN_EMAIL_HASH || !env.ADMIN_PW_HASH || !env.ADMIN_CODE_HASH) return false;
+  try {
+    const p = C.verify(token, { purpose: 'admin-session' });
+    return !!p && p.sub === 'admin' && typeof p.cv === 'string' && C.safeEqual(p.cv, adminCredentialVersion(env));
+  } catch {
+    return false;   // fail closed on any key-derivation problem
+  }
 }
 
 // ─── Misc ────────────────────────────────────────────────────────────────────
@@ -214,7 +243,8 @@ async function padTo(started, minMs, jitterMs = 150) {
 
 module.exports = {
   SESSION_PURPOSE, SESSION_TTL_SECONDS, SESSION_REFRESH_AFTER, PW_MIN_NEW, PW_MAX,
-  supa, ok2xx, rows, isUniqueViolation, isMissingColumn, q, getUser, configured,
+  CONSENT_VERSION, AGE_BANDS, normAgeBand,
+  supa, rpc, ok2xx, rows, isUniqueViolation, isMissingColumn, q, getUser, configured,
   normEmail, normName, pwForScrypt, pwForLegacy, validNewPassword,
   sessionVersion, issueSession, bearer, verifySessionToken, authenticate, publicUser,
   adminCredentialVersion, isAdminToken,

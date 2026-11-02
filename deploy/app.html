@@ -2867,6 +2867,13 @@ window.MQ = window.MQ || {};
 </script>
     <script>const { useState, useEffect } = React;
 const e = React.createElement;
+// Version of the Terms/Privacy consent shown at sign-up. The server (lib/session.js CONSENT_VERSION) must use the same
+// value; auth-signup rejects any other. Change both together when the policy text changes.
+const CONSENT_VERSION = '2026-11-02';
+// Under-13 sign-up block: kept in localStorage (all tabs, survives closing the browser) and in sessionStorage.
+const AGE_BLOCK_KEY = 'mqAgeBlock';
+const ageBlockGet = () => { try { return localStorage.getItem(AGE_BLOCK_KEY) === '1' || sessionStorage.getItem(AGE_BLOCK_KEY) === '1'; } catch { return false; } };
+const ageBlockSet = () => { try { localStorage.setItem(AGE_BLOCK_KEY, '1'); } catch {} try { sessionStorage.setItem(AGE_BLOCK_KEY, '1'); } catch {} };
 const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdFvOZcst2ARMxy2CxtGuaa7J1G2Zr3rMccPvKNQwJpnW81IA/viewform?usp=header';
 const fmtMoney = (n) => '$' + Math.round(n).toLocaleString('en-US');
 // Safe localStorage JSON read: bad or old saved data falls back instead of white-screening the app
@@ -2883,6 +2890,22 @@ const lsDays = (key) => Math.floor(finNum(localStorage.getItem(key), 0, 36500, 0
 // many tiny ones can't mint fractions of a cent (or get shares for $0.00). The 1e-6 absorbs float noise like 0.1*3.
 const centsUp = (x) => Math.ceil(x * 100 - 1e-6) / 100;
 const centsDown = (x) => Math.max(0, Math.floor(x * 100 + 1e-6) / 100);
+// Live quote maps from get-prices / get-crypto: keep only finite positive numbers (a bad value can't crash .toFixed
+// or be traded), and merge into what is already loaded so a partial answer never drops quotes the app already has.
+const okPrice = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= 1e9;
+const mergeStockQuotes = (prev, data) => {
+  const out = { ...prev };
+  if (data && typeof data === 'object' && !Array.isArray(data)) Object.keys(data).forEach(sym => { if (/^[A-Z.^-]{1,8}$/.test(sym) && okPrice(data[sym])) out[sym] = data[sym]; });
+  return out;
+};
+const mergeCryptoQuotes = (prev, data) => {
+  const out = { ...prev };
+  if (data && typeof data === 'object' && !Array.isArray(data)) Object.keys(data).forEach(sym => {
+    const q = data[sym];
+    if (/^[A-Z0-9]{1,10}$/.test(sym) && q && typeof q === 'object' && okPrice(q.price)) out[sym] = { ...q, price: q.price, change24h: Number.isFinite(q.change24h) ? q.change24h : 0 };
+  });
+  return out;
+};
 const MARKET_ASOF = 'June 2025';
 const marketSnapshot = [
   { label: 'S&P 500', value: '≈ 6,200', note: 'Large-cap U.S. stock index' },
@@ -3153,16 +3176,33 @@ const applyProgressToLocal = (email, p) => {
   }
 };
 // Older versions saved a "Find my home" street address. When the app opens, replace it everywhere in this user's
-// saved data (property list, money ledger, bills, texts) and mark the cleaned copies newer so they replace the cloud copy.
+// saved data (property list, money ledger, bills, texts, deal calculator) and mark the cleaned copies newer so they
+// replace the cloud copy. A home that was already sold is no longer in myProps, so its address is also looked for in
+// the money text those versions wrote ("Mortgage + taxes + insurance · <address>", "payment on <address> (…"): every
+// address found there that is not one of the player's current practice properties is replaced too.
+const RE_LEGACY_ADDR_RES = [
+  /(?:Mortgage \+ taxes \+ insurance|Property taxes \+ insurance|Mortgage \+ taxes|Property taxes) · ([^"\\]{5,160}?)"/g,
+  /(?:mortgage payment on|missed mortgage payments on|property taxes\/insurance on|[Pp]ayment due on) ([^"\\(]{5,160}?)(?: \(|\. |\.?")/g,
+];
+const RE_LEGACY_TEXT_KEYS = ['econ', 'bank', 'phoneTexts', 'dealCalc', 'nwHist'];
 const reMigrateLocalHomes = (email) => {
   const raw = lsJSON('myProps::' + email, '[]');
   if (!Array.isArray(raw)) return;
   const isLookup = (p) => reIsPrivateHome(p) && (p.homeLookup || p.confidence !== undefined || p.explain !== undefined);
   const needs = raw.some(p => reIsPrivateHome(p) && (p.zip !== undefined || p.geo !== undefined || (isLookup(p) && (p.address !== 'My home' || !/^home_/.test(String(p.id))))
     || (Number.isFinite(Number(p.lat)) && reRound2(p.lat) !== Number(p.lat)) || (Number.isFinite(Number(p.lng)) && reRound2(p.lng) !== Number(p.lng))));
-  if (!needs) return;
-  const addrs = [...new Set(raw.filter(p => isLookup(p) && typeof p.address === 'string' && p.address !== 'My home' && p.address.trim().length >= 5).map(p => JSON.stringify(p.address).slice(1, -1)))];
-  if (addrs.length) {
+  const esc = (a) => JSON.stringify(a).slice(1, -1);
+  const addrs = new Set(raw.filter(p => isLookup(p) && typeof p.address === 'string' && p.address !== 'My home' && p.address.trim().length >= 5).map(p => esc(p.address)));
+  // Addresses of practice properties the player owns now are made-up listings, not a home: those stay.
+  const keep = new Set(raw.filter(p => !reIsPrivateHome(p) && typeof p.address === 'string').map(p => esc(p.address)));
+  keep.add('My home');
+  RE_LEGACY_TEXT_KEYS.forEach(n => {
+    const v = lsGet(n + '::' + email);
+    if (!v) return;
+    RE_LEGACY_ADDR_RES.forEach(re => { re.lastIndex = 0; let m; while ((m = re.exec(v))) { const a = m[1].trim(); if (a.length >= 5 && !keep.has(a) && /\d/.test(a)) addrs.add(a); } });
+  });
+  let textChanged = false;
+  if (addrs.size) {
     try {
       const keys = [];
       for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
@@ -3170,15 +3210,20 @@ const reMigrateLocalHomes = (email) => {
         let v = localStorage.getItem(key), changed = false;
         if (!v) return;
         addrs.forEach(a => { if (v.indexOf(a) >= 0) { v = v.split(a).join('My home'); changed = true; } });
-        if (changed) localStorage.setItem(key, v);
+        if (changed) { localStorage.setItem(key, v); textChanged = true; }
       });
     } catch {}
   }
-  const re = reScrubRE(raw, lsJSON('reTenants::' + email, '{}')), now = String(Date.now());
-  lsSet('myProps::' + email, JSON.stringify(re.myProps));
-  lsSet('reTenants::' + email, JSON.stringify(re.reTenants));
-  lsSet('reSavedAt::' + email, now);
-  if (addrs.length && lsGet('econ::' + email) != null && lsGet('bank::' + email) != null) lsSet('econSavedAt::' + email, now);
+  if (!needs && !textChanged) return;
+  const now = String(Date.now());
+  if (needs) {
+    const re = reScrubRE(raw, lsJSON('reTenants::' + email, '{}'));
+    lsSet('myProps::' + email, JSON.stringify(re.myProps));
+    lsSet('reTenants::' + email, JSON.stringify(re.reTenants));
+    lsSet('reSavedAt::' + email, now);
+  }
+  // economy (ledger, bank notices and the extras: texts, deal calculator) is re-sent so the cloud copy is cleaned too
+  if (textChanged && lsGet('econ::' + email) != null && lsGet('bank::' + email) != null) lsSet('econSavedAt::' + email, now);
 };
 // Money Quest save score: higher = further along; used to pick local vs cloud.
 const kqSaveScore = (s) => s && typeof s === 'object' ? (s.xp || 0) * 1000 + (s.plays || 0) : -1;
@@ -4479,7 +4524,7 @@ const [adminCode, setAdminCode] = useState('');
 // Sign-up age screen + consent (COPPA). Only the age band is ever sent; under 13 stops here.
 const [age, setAge] = useState('');
 const [agree, setAgree] = useState(false);
-const [ageBlocked, setAgeBlocked] = useState(() => { try { return sessionStorage.getItem('mqAgeBlock') === '1'; } catch { return false; } });
+const [ageBlocked, setAgeBlocked] = useState(ageBlockGet);
 const [error, setError] = useState(notice || '');
 const [loading, setLoading] = useState(false);
 const busyRef = React.useRef(false);
@@ -4574,11 +4619,11 @@ if (busyRef.current) return;   // a ref, not state: double-clicks / repeated Ent
 setError('');
 const em = email.trim().toLowerCase();
 if (mode === 'signup') {
-  // Neutral age screen first. Under 13: no account, nothing is sent or stored except a tab-only flag so the age
-  // can't simply be changed and re-submitted (FTC guidance for age screens).
+  // Neutral age screen first. Under 13: no account, nothing is sent; only a device flag (no age, no name) is stored
+  // so the age can't simply be changed and re-submitted in this or another tab (FTC guidance for age screens).
   if (ageBlocked) return;
   if (!age) { setError('Please tell us how old you are.'); return; }
-  if (age === 'u13') { setAgeBlocked(true); try { sessionStorage.setItem('mqAgeBlock', '1'); } catch {} return; }
+  if (age === 'u13') { setAgeBlocked(true); ageBlockSet(); return; }
   if (!name.trim()) { setError('Please enter your first name or a nickname.'); return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError('Please enter a valid email address.'); return; }
   if (password.trim().length < 8) { setError('Password must be at least 8 characters.'); return; }
@@ -4592,9 +4637,9 @@ if (mode === 'signup') {
 setLoading(true); busyRef.current = true;
 try {
   if (mode === 'signup') {
-    // ageBand / consentVersion are sent for the server to record once it stores them (never the exact age)
+    // ageBand / consentVersion are recorded by the server with the account (never the exact age)
     const r = await apiCall('auth-signup', { method: 'POST', auth: false, body: {
-      name: name.trim(), email: em, password, code: accessCode.trim(), ageBand: age === '18+' ? '18+' : '13-17', consentVersion: '2026-11-02' } });
+      name: name.trim(), email: em, password, code: accessCode.trim(), ageBand: age === '18+' ? '18+' : '13-17', consentVersion: CONSENT_VERSION } });
     const u = r.status === 201 || r.status === 200 ? userFromApi(r.data.user) : null;
     if (u && TOKEN_RE.test(r.data.token || '')) {
       clearLocalUserData();   // nothing from an earlier account on this device carries over
@@ -4687,7 +4732,7 @@ mode === 'signup' && (ageBlocked
   : e('div', {},
       e('label', { className: 'field-label', htmlFor: 'mq-age' }, 'How old are you?'),
       e('select', { id: 'mq-age', className: 'input-field', value: age, onChange: (ev) => { const v = ev.target.value; setError('');
-          if (v === 'u13') { setAge(''); setAgeBlocked(true); try { sessionStorage.setItem('mqAgeBlock', '1'); } catch {} } else setAge(v); } },
+          if (v === 'u13') { setAge(''); setAgeBlocked(true); ageBlockSet(); } else setAge(v); } },
         e('option', { value: '' }, 'Choose your age'),
         e('option', { value: 'u13' }, '12 or younger'),
         ...['13', '14', '15', '16', '17'].map(a => e('option', { key: a, value: a }, a)),
@@ -4705,7 +4750,7 @@ mode === 'signup' && !signupGate && e('div', {},
 e('label', { className: 'field-label' }, 'Confirm Password'),
 e('input', { className: 'input-field', type: 'password', value: confirm, onChange: (ev) => setConfirm(ev.target.value), placeholder: 'Re-enter password' }),
 e('label', { className: 'field-label' }, 'Access Code'),
-e('input', { className: 'input-field', value: accessCode, onChange: (ev) => setAccessCode(ev.target.value), placeholder: 'INVEST-XXXX-XXXX', style: { textTransform: 'uppercase' } }),
+e('input', { className: 'input-field', value: accessCode, onChange: (ev) => setAccessCode(ev.target.value), placeholder: 'XXXX-XXXX-XXXX', style: { textTransform: 'uppercase' } }),
 e('div', { style: { background: 'rgba(67,97,238,0.08)', border: '1px solid rgba(67,97,238,0.25)', borderRadius: '10px', padding: '12px 14px', marginBottom: '12px' } },
   e('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' } }, "Don't have an access code yet?"),
   e('a', {
@@ -4717,7 +4762,7 @@ e('div', { style: { background: 'rgba(67,97,238,0.08)', border: '1px solid rgba(
   e('div', { style: { fontSize: '10px', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '6px' } }, "You'll receive your access code after subscribing")
 ),
 e('label', { style: { display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 12px', lineHeight: 1.5, cursor: 'pointer' } },
-  e('input', { type: 'checkbox', checked: agree, onChange: (ev) => setAgree(ev.target.checked), style: { marginTop: 3, flex: 'none' } }),
+  e('input', { type: 'checkbox', required: true, checked: agree, onChange: (ev) => setAgree(ev.target.checked), style: { marginTop: 3, flex: 'none' } }),
   e('span', {}, age === '18+' ? 'I agree to the ' : 'I have read the ',
     e('a', { href: 'terms.html', target: '_blank', rel: 'noopener', style: { color: '#93a5ff' } }, 'Terms of Use'), ' and ',
     e('a', { href: 'privacy.html', target: '_blank', rel: 'noopener', style: { color: '#93a5ff' } }, 'Privacy Policy'),
@@ -6159,9 +6204,24 @@ const KidQuest = ({ onTrack, makeQuiz, cloudSave, cloudLoad, storeKey, playerNam
 // Map tiles: swap this one constant to change the basemap (CSP img-src in netlify.toml must allow the host).
 // Map tiles: the default needs no key (OpenStreetMap + a dark CSS filter). If MAPTILER_KEY or STADIA_API_KEY is set in
 // Netlify's environment variables, /.netlify/functions/map-config returns that provider instead (keys never live in this file).
-const RE_TILES = { provider:'osm', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors', subdomains: 'abc', maxZoom: 19, darkFilter: true };
+// Leaflet writes the attribution with innerHTML, so it never comes from the network: it is picked here by provider.
+// The tile URL is accepted only from the three known hosts (anything else falls back to OpenStreetMap).
+const RE_ATTR = {
+  osm: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  maptiler: '© <a href="https://www.maptiler.com/copyright/" target="_blank" rel="noopener">MapTiler</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  stadia: '© <a href="https://stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a> © <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+};
+const RE_TILE_HOSTS = { osm: /^https:\/\/tile\.openstreetmap\.org\//, maptiler: /^https:\/\/api\.maptiler\.com\//, stadia: /^https:\/\/tiles\.stadiamaps\.com\// };
+const RE_TILES = { provider:'osm', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: RE_ATTR.osm, subdomains: 'abc', maxZoom: 19, darkFilter: true };
+const reSafeTiles = (c) => {
+  if (!c || typeof c !== 'object' || typeof c.url !== 'string' || c.url.length > 500 || /[\s"'<>\\]/.test(c.url)) return RE_TILES;
+  const provider = Object.keys(RE_TILE_HOSTS).find(k => RE_TILE_HOSTS[k].test(c.url));
+  if (!provider) return RE_TILES;
+  return { provider, url: c.url, attribution: RE_ATTR[provider], subdomains: typeof c.subdomains === 'string' && /^[a-z]{0,8}$/.test(c.subdomains) ? (c.subdomains || 'abc') : 'abc',
+    maxZoom: Math.min(20, Math.max(10, Math.floor(Number(c.maxZoom) || 19))), darkFilter: c.darkFilter === true };
+};
 let _reTileCfg = null;
-const reTileConfig = () => _reTileCfg || (_reTileCfg = fetch('/.netlify/functions/map-config').then(r => r.ok ? r.json() : null).then(c => (c && c.url ? c : RE_TILES)).catch(() => RE_TILES));
+const reTileConfig = () => _reTileCfg || (_reTileCfg = fetch('/.netlify/functions/map-config').then(r => r.ok ? r.json() : null).then(reSafeTiles).catch(() => RE_TILES));
 const RE_START = { lat: 38.6, lng: -92.5, zoom: 6 };   // Missouri
 const RE_MIN_LIST_ZOOM = 14;
 const RE_QUERY_BOX = 0.02;                             // ≈ 2 km square around the map center per request (Overpass stays fast)
@@ -6215,14 +6275,29 @@ const reSourceBadge = (p) => {
   if (p.source === 'offline') return { text: 'Practice listing · made-up home (offline mode)', color: '#FF9F1C' };
   return { text: 'Practice listing · real address, estimated price (seller & agents are made up)', color: '#B4BCE6' };
 };
-const reFetchJSON = async (url, ms) => {
+// cache:'no-store': answers can hold a typed street address, so they must never land in the browser's HTTP cache.
+// With `body` the request is a POST with a JSON body (keeps addresses out of URLs and request logs).
+const reFetchJSON = async (url, ms, body) => {
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const to = ctrl ? setTimeout(() => ctrl.abort(), ms || 20000) : null;
   try {
-    const r = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
-    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const opts = { cache: 'no-store', credentials: 'same-origin' };
+    if (ctrl) opts.signal = ctrl.signal;
+    if (body !== undefined) { opts.method = 'POST'; opts.headers = { 'Content-Type': 'application/json', Accept: 'application/json' }; opts.body = JSON.stringify(body); }
+    const r = await fetch(url, opts);
+    if (!r.ok) { const err = new Error('HTTP ' + r.status); err.status = r.status; throw err; }
     return await r.json();
   } finally { if (to) clearTimeout(to); }
+};
+// POST {params} to a function; an older server that only knows GET answers 405, then the same query goes as GET.
+const rePostJSON = async (fn, params, ms) => {
+  const url = '/.netlify/functions/' + fn;
+  try { return await reFetchJSON(url, ms, params); }
+  catch (err) {
+    if (!err || err.status !== 405) throw err;
+    const qs = Object.keys(params).filter(k => params[k] !== undefined && params[k] !== '').map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+    return reFetchJSON(url + '?' + qs, ms);
+  }
 };
 // Leaflet map. Created ONCE per mount; markers/fly-to update through effects. Rendered with e(REMap).
 const REMap = ({ listings, ownedIds, selectedId, onSelect, onViewChange, flyTo, initialView }) => {
@@ -7617,7 +7692,7 @@ const fetchLivePrices = async () => {
 setPricesLoading(true);
 try {
 const res = await fetch('/.netlify/functions/get-prices');
-if (res.ok) { const data = await res.json(); if (Object.keys(data).length > 0) { setLiveStockPrices(data); setPricesLastUpdated(new Date()); } }
+if (res.ok) { const data = await res.json(); if (data && typeof data === 'object' && Object.keys(data).length > 0) { setLiveStockPrices(prev => mergeStockQuotes(prev, data)); setPricesLastUpdated(new Date()); } }
 } catch {}
 setPricesLoading(false);
 };
@@ -7626,21 +7701,24 @@ const fetchCryptoPrices = async () => {
   setCryptoLoading(true);
   try {
     const res = await fetch('/.netlify/functions/get-crypto');
-    if (res.ok) { const data = await res.json(); if (Object.keys(data).length > 0) setLiveCryptoPrices(data); }
+    if (res.ok) { const data = await res.json(); if (data && typeof data === 'object' && Object.keys(data).length > 0) setLiveCryptoPrices(prev => mergeCryptoQuotes(prev, data)); }
   } catch {}
   setCryptoLoading(false);
 };
 useEffect(() => { fetchCryptoPrices(); const iv = setInterval(fetchCryptoPrices, 60000); return () => clearInterval(iv); }, []);
 const getCryptoPrice = (sym) => liveCryptoPrices[sym]?.price || CRYPTO_COINS.find(c=>c.sym===sym)?.defaultPrice || 0;
+// Trades only happen at a live quote: buying at the built-in backup price and selling at a live one (or the other
+// way round) was a risk-free loop. Until the symbol's live quote has loaded, buy and sell wait.
+const liveCrypto = (sym) => { const q = liveCryptoPrices[sym]; return q && okPrice(q.price) ? q.price : 0; };
 const handleBuyCrypto = () => {
   const qty = parseFloat(cryptoBuyQty);
   if (!qty || qty <= 0 || isNaN(qty)) return;
   const coin = cryptoBuyModal;
-  const price = getCryptoPrice(coin.sym);
-  if (!(price > 0) || !Number.isFinite(qty)) return;
+  const price = liveCrypto(coin.sym);
+  if (!(price > 0) || !Number.isFinite(qty)) { alert('Waiting for a live price for ' + coin.sym + '. Try again in a moment.'); return; }
   const cost = centsUp(qty * price);
   if (!(cost >= 0.01) || cost > portfolio.cash) return;   // no free coins from orders that round to $0.00
-  setPortfolio(prev => ({...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, {id:Date.now(), name:coin.sym, type:'Crypto', quantity:qty, purchasePrice:price, datePurchased:new Date().toLocaleDateString(), seed:Math.random()}]}));
+  setPortfolio(prev => ({...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, {id:Date.now(), name:coin.sym, type:'Crypto', quantity:qty, purchasePrice:price, priceSource:'live', datePurchased:new Date().toLocaleDateString(), seed:Math.random()}]}));
   trackEvent('buy_crypto', {sym:coin.sym, qty, cost});
   setCryptoBuyModal(null); setCryptoBuyQty('');
 };
@@ -8036,26 +8114,36 @@ const rePropertyValue = (prop) => Math.round(prop.price * (1 + (prop.appreciatio
 
 // Returns live price if available, falls back to static price from realStockData
 const getLivePrice = (sym) => liveStockPrices[sym] || realStockData[sym]?.price || 0;
+const liveStock = (sym) => okPrice(liveStockPrices[sym]) ? liveStockPrices[sym] : 0;   // trades need this (see liveCrypto)
 
 
 const handleBuyStock = () => {
 const qty = parseFloat(buyQty);
 if (!qty || qty <= 0 || isNaN(qty)) return;
-const price = getLivePrice(buyModal.sym);
-if (!(price > 0) || !Number.isFinite(qty)) return;
+const price = liveStock(buyModal.sym);
+if (!(price > 0) || !Number.isFinite(qty)) { alert('Waiting for a live price for ' + buyModal.sym + '. Try again in a moment.'); return; }
 const cost = centsUp(qty * price);
 if (!(cost >= 0.01) || cost > portfolio.cash) return;   // no free shares from orders that round to $0.00
 const type = buyModal.d.sector === 'ETF' ? 'ETF' : buyModal.d.sector === 'Bond' ? 'Bond' : 'Stock';
 const _sym = buyModal.sym;
-setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, { id: Date.now(), name: _sym, type, quantity: qty, purchasePrice: price, datePurchased: new Date().toLocaleDateString(), seed: Math.random(), buyDay: daysElapsed }] }));
+setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash - cost).toFixed(2)), investments: [...prev.investments, { id: Date.now(), name: _sym, type, quantity: qty, purchasePrice: price, priceSource: 'live', datePurchased: new Date().toLocaleDateString(), seed: Math.random(), buyDay: daysElapsed }] }));
 trackEvent('buy_stock', { sym: buyModal.sym, qty, cost });
 setBuyModal(null);
 setBuyQty('');
 };
+// Sale price: a holding valued at today's quote (crypto, or a stock not yet aged by the time machine) sells only at a
+// live quote. Time-machine growth (simulatePrice) is computed from the purchase price, so it needs no quote.
+const salePrice = (inv) => {
+  if (inv.type === 'Crypto') return liveCrypto(inv.name);
+  const held = daysElapsed - (inv.buyDay || 0);
+  return held <= 0 ? liveStock(inv.name) : calculateCurrentPrice(inv);
+};
 const sellInvestment = (id) => {
   const inv = portfolio.investments.find(i => i.id === id);
   if (!inv) return;
-  const proceeds = centsDown(calculateCurrentPrice(inv) * inv.quantity);
+  const px = salePrice(inv);
+  if (!(px > 0)) { alert('Waiting for a live price for ' + inv.name + '. Try again in a moment.'); return; }
+  const proceeds = centsDown(px * inv.quantity);
   if (!Number.isFinite(proceeds)) return;
   if (!window.confirm('Sell ' + inv.quantity + ' ' + inv.name + ' for ' + fmtMoney(proceeds) + '?')) return;
   setPortfolio(prev => ({ ...prev, cash: parseFloat((prev.cash + proceeds).toFixed(2)), investments: prev.investments.filter(i => i.id !== id) }));
@@ -9452,7 +9540,7 @@ const CryptoTab = () => {
           parseFloat(cryptoBuyQty) * getCryptoPrice(cryptoBuyModal.sym) > portfolio.cash && e('div', {style:{color:'#ef4444',fontSize:12,marginTop:4}}, '⚠ Insufficient funds')
         ),
         e('div', {style:{display:'flex',gap:10}},
-          e('button', {className:'btn btn-primary', style:{flex:1}, onClick:handleBuyCrypto, disabled: !cryptoBuyQty || parseFloat(cryptoBuyQty)*getCryptoPrice(cryptoBuyModal.sym)>portfolio.cash}, 'Buy Now'),
+          e('button', {className:'btn btn-primary', style:{flex:1}, onClick:handleBuyCrypto, disabled: !liveCrypto(cryptoBuyModal.sym) || !cryptoBuyQty || parseFloat(cryptoBuyQty)*getCryptoPrice(cryptoBuyModal.sym)>portfolio.cash}, liveCrypto(cryptoBuyModal.sym) ? 'Buy Now' : 'Waiting for a live price'),
           e('button', {className:'btn-ghost', style:{flex:1}, onClick:()=>{setCryptoBuyModal(null);setCryptoBuyQty('');}}, 'Cancel')
         )
       )
@@ -9660,7 +9748,7 @@ const reSearch = async (ev) => {
   if (q.length < 2) return;
   setGeoState({ loading:true, results:null, msg:'' });
   let results = [];
-  try { const j = await reFetchJSON('/.netlify/functions/re-geocode?q=' + encodeURIComponent(q), 12000); results = Array.isArray(j.results) ? j.results : []; }
+  try { const j = await rePostJSON('re-geocode', { q }, 12000); results = Array.isArray(j.results) ? j.results : []; }
   catch {
     const ql = q.toLowerCase();
     results = RE_PLACES.filter(p => (p[0] + ' ' + p[1]).toLowerCase().includes(ql) || ql.includes(p[0].toLowerCase()))
@@ -9672,7 +9760,10 @@ const reSearch = async (ev) => {
 const reGoTo = (r) => {
   setGeoState({ loading:false, results:null, msg:'' });
   setMapPlace({ city: r.city || '', state: r.stateCode || r.state || '' });
-  setMapFly({ lat: r.lat, lng: r.lng, zoom: r.kind === 'address' ? 17 : Math.max(r.zoom || 13, 13), bbox: r.kind === 'place' && r.bbox && (r.bbox.north - r.bbox.south) < 0.3 ? r.bbox : null, seq: Date.now() });
+  // A typed street address is someone's home: the map (and so the tiles and the Overpass/listings box it asks for)
+  // only goes to a point rounded to ~1 km at neighborhood zoom, never to the house itself.
+  if (r.kind === 'address') { const la = reRound2(r.lat), ln = reRound2(r.lng); if (la != null && ln != null) setMapFly({ lat: la, lng: ln, zoom: RE_MIN_LIST_ZOOM, seq: Date.now() }); return; }
+  setMapFly({ lat: r.lat, lng: r.lng, zoom: Math.max(r.zoom || 13, 13), bbox: r.kind === 'place' && r.bbox && (r.bbox.north - r.bbox.south) < 0.3 ? r.bbox : null, seq: Date.now() });
 };
 const reFindHome = async (ev) => {
   if (ev) ev.preventDefault();
@@ -9683,20 +9774,21 @@ const reFindHome = async (ev) => {
   }
   setHomeForm(Object.assign({}, f, { loading:true, err:'' }));
   try {
-    const qs = 'address=' + encodeURIComponent(addr) + (f.beds ? '&beds=' + encodeURIComponent(f.beds) : '') + (f.sqft ? '&sqft=' + encodeURIComponent(f.sqft) : '');
-    const j = await reFetchJSON('/.netlify/functions/re-value?' + qs, 20000);
+    const j = await rePostJSON('re-value', { address: addr, beds: f.beds ? String(f.beds) : undefined, sqft: f.sqft ? String(f.sqft) : undefined }, 20000);
     if (!j || !j.property) {
       setHomeForm(Object.assign({}, f, { loading:false, err: j && j.error === 'not_found' ? "We couldn't match that address. Check the spelling and ZIP code, or pick a house near you on the map instead." : 'Please type your full street address.' }));
       return;
     }
     // Privacy: the street address, ZIP, census tract and exact location are used once and never kept. The home
     // gets a random id (the server's id is derived from the address) and coordinates rounded to ~1 km.
-    const exact = { lat: Number(j.property.lat), lng: Number(j.property.lng) };
+    // The map only ever goes to the rounded point (~1 km) at neighborhood zoom, so neither the tile servers nor the
+    // Overpass / listings box around the map center can reveal which house it is.
+    const near = { lat: reRound2(j.property.lat), lng: reRound2(j.property.lng) };
     const p = reNormalize(reScrubHome(Object.assign({}, j.property, { id:'home_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), homeLookup:true,
       isHome:true, valueLow:j.valueLow, valueHigh:j.valueHigh, explain:j.explain, confidence:j.confidence, source:j.source })));
     setMapListings(prev => [...prev.filter(x => !(x.isHome && x.homeLookup)), p]);
     setMapPlace({ city: p.city, state: p.state });
-    if (Number.isFinite(exact.lat) && Number.isFinite(exact.lng)) setMapFly({ lat:exact.lat, lng:exact.lng, zoom:17, seq:Date.now() });   // in memory only
+    if (near.lat != null && near.lng != null) setMapFly({ lat:near.lat, lng:near.lng, zoom:RE_MIN_LIST_ZOOM, seq:Date.now() });
     setHomeForm(null);
     setSelectedProp(p);
     trackEvent('find_my_home', { source: j.source });
@@ -10456,7 +10548,7 @@ e('div', {},
     e('div', { className:'kq-top-card', style:{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:0 } },
       e('div', { className:'user-avatar', style:{ width:48, height:48, fontSize:22 } }, (user.name || '?').charAt(0).toUpperCase()),
       e('div', { style:{ flex:1, minWidth:140 } }, e('div', { style:{ fontWeight:700, fontSize:18 } }, user.name), e('div', { className:'kq-sub', style:{ margin:0 } }, user.practice ? 'Practice Mode' : user.email)),
-      e('button', { type:'button', className:'kq-chip', onClick: openFeedback }, '💬 Feedback'),
+      kqTrack === 'pro' && e('button', { type:'button', className:'kq-chip', onClick: openFeedback }, '💬 Feedback'),   // Google Form: Pro (teen/adult) track only, never Junior
       e('button', { type:'button', className:'kq-chip', onClick: onSignOut }, user.practice ? 'Exit Practice' : 'Sign Out'),
       !user.practice && onDeleteData && e('button', { type:'button', className:'kq-chip', onClick: onDeleteData, title:'Remove everything Money Quest saved on this device and sign out' }, '🗑️ Delete my data')
     ),
@@ -10568,9 +10660,10 @@ reTx && reTxOpen && worldPanel && worldPanel.id === 'house' && e(HomeBuyFlow, { 
   onClose:() => { setReTxOpen(false); if (['done','dead'].includes(reTx.stage)) { setReTx(null); setWorldPanel(null); } } }),
 buyModal && (() => {
 const livePrice = getLivePrice(buyModal.sym);
+const hasLive = liveStock(buyModal.sym) > 0;
 const qty = parseFloat(buyQty) || 0;
 const cost = parseFloat((qty * livePrice).toFixed(2));
-const canAfford = qty > 0 && cost <= portfolio.cash;
+const canAfford = qty > 0 && cost <= portfolio.cash && hasLive;
 const sectorColor = buyModal.d.sector === 'ETF' ? '#3b82f6' : buyModal.d.sector === 'Bond' ? '#f59e0b' : 'var(--primary)';
 const trendColor = buyModal.d.trend === 'up' ? 'var(--success)' : buyModal.d.trend === 'down' ? '#ef4444' : '#f59e0b';
 const trendLabel = buyModal.d.trend === 'up' ? '▲ Trending Up' : buyModal.d.trend === 'down' ? '▼ Trending Down' : '● Stable';
@@ -10604,13 +10697,13 @@ return e('div', { className: 'modal-overlay', onClick: () => setBuyModal(null) }
       e('div', { style: { fontSize: 28, fontWeight: 900, letterSpacing: '-1px', color: qty > 0 ? (canAfford ? 'var(--success)' : '#ef4444') : 'var(--text-secondary)' } }, qty > 0 ? fmtMoney(cost) : '—'),
       e('div', { style: { fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 } }, 'Cash available: ' + fmtMoney(portfolio.cash))
     ),
-    !canAfford && qty > 0 && e('div', { style: { background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', color: '#fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 12 } },
+    hasLive && !canAfford && qty > 0 && e('div', { style: { background: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444', color: '#fca5a5', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 12 } },
       'Not enough cash — you need ' + fmtMoney(cost - portfolio.cash) + ' more.'
     ),
     e('div', { style: { display: 'flex', gap: 10, marginTop: 4 } },
       e('button', { onClick: () => setBuyModal(null), className: 'btn btn-secondary', style: { flex: 1 } }, 'Cancel'),
       e('button', { onClick: handleBuyStock, className: 'btn btn-primary', disabled: !canAfford, style: { flex: 2, opacity: canAfford ? 1 : 0.45, cursor: canAfford ? 'pointer' : 'not-allowed' } },
-        qty > 0 ? 'Buy — ' + fmtMoney(cost) : 'Enter shares to buy'
+        !hasLive ? (pricesLoading ? 'Loading live price…' : 'Waiting for a live price') : qty > 0 ? 'Buy — ' + fmtMoney(cost) : 'Enter shares to buy'
       )
     )
   )

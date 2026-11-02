@@ -82,9 +82,8 @@ function parseV6(s) {
     if (!v4) return null;
     const o = v4.split('.').map(Number);
     tail = [(o[0] << 8) | o[1], (o[2] << 8) | o[3]];
-    s = s.slice(0, lastColon + 1) + (s[lastColon - 1] === ':' ? '' : '0'); // keep "::" intact
-    if (s.endsWith(':0') && s[lastColon - 1] !== ':') s = s.slice(0, -2);
-    else if (s.endsWith(':') && !s.endsWith('::')) s = s.slice(0, -1);
+    s = s.slice(0, lastColon + 1);                    // "::ffff:" or "64:ff9b::" or "1:2:3:4:5:6:"
+    if (!s.endsWith('::')) s = s.slice(0, -1);        // drop the single separator colon
   }
   const dbl = s.split('::');
   if (dbl.length > 2) return null;

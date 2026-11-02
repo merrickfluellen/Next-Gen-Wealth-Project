@@ -5,7 +5,9 @@
  * Uses ONLY Node's built-in `crypto` module. No dependencies.
  *
  * ─── Environment variables ───────────────────────────────────────────────────
- *   SESSION_SECRET   (required) Master secret. Every key used here is derived
+ *   SESSION_SECRET   (required, >= 32 characters — shorter values are REJECTED: every
+ *                    key operation throws and callers fail closed with 500/503)
+ *                    Master secret. Every key used here is derived
  *                    from it with HKDF-SHA256 (one 256-bit key per purpose), so
  *                    the same secret never directly keys two different jobs.
  *                    Use a long random value, e.g.
@@ -42,10 +44,19 @@ const crypto = require('crypto');
 const HKDF_SALT = Buffer.from('moneyquest/auth/hkdf-salt/v1');
 const keyCache = new Map();
 
+const MIN_SECRET_LEN = 32;
+
+/** The HKDF master secret. Throws (callers fail closed) if unset or shorter than 32 characters. */
 function masterSecret() {
   const s = process.env.SESSION_SECRET;
   if (!s || typeof s !== 'string') throw new Error('SESSION_SECRET is not set');
+  if (s.length < MIN_SECRET_LEN) throw new Error(`SESSION_SECRET must be at least ${MIN_SECRET_LEN} characters`);
   return s;
+}
+
+/** True when SESSION_SECRET is usable (set and long enough). Never throws. */
+function secretConfigured() {
+  try { masterSecret(); return true; } catch { return false; }
 }
 
 /** Derive a 32-byte key for one purpose (HKDF-SHA256). Cached per secret+purpose. */
@@ -182,6 +193,9 @@ function legacyHash(str) {
 }
 
 const SCRYPT = { N: 32768, r: 8, p: 1, keylen: 32 };
+// Highest cost verifySecret will run for a STORED hash (we issue N=32768,r=8,p=1). Bigger values
+// (e.g. a corrupted/planted row with N=2^20,r=32) would need GBs and OOM-kill the instance.
+const SCRYPT_MAX = { N: 131072, r: 16, p: 4 };
 const scryptOpts = (N, r, p) => ({ N, r, p, maxmem: 128 * N * r * p * 2 });
 
 /** New-style hash: scrypt with a per-hash 128-bit salt. */
@@ -203,9 +217,11 @@ function verifySecret(str, stored) {
     if (stored.startsWith('scrypt$')) {
       const [, Ns, rs, ps, saltS, hashS] = stored.split('$');
       const N = parseInt(Ns, 10), r = parseInt(rs, 10), p = parseInt(ps, 10);
-      if (!(N >= 1024 && N <= 1048576 && (N & (N - 1)) === 0 && r >= 1 && r <= 32 && p >= 1 && p <= 16)) return false;
+      if (!(N >= 1024 && N <= SCRYPT_MAX.N && (N & (N - 1)) === 0 &&
+            r >= 1 && r <= SCRYPT_MAX.r && p >= 1 && p <= SCRYPT_MAX.p)) return false;
+      if (!B64U_RE.test(saltS || '') || !B64U_RE.test(hashS || '')) return false;
       const expected = unb64u(hashS);
-      if (expected.length < 16) return false;
+      if (expected.length < 16 || expected.length > 64) return false;
       const dk = crypto.scryptSync(str, unb64u(saltS), expected.length, scryptOpts(N, r, p));
       return crypto.timingSafeEqual(dk, expected);
     }
@@ -287,24 +303,51 @@ function parseJsonBody(event, maxBytes = 4096) {
   } catch { return null; }
 }
 
-/** Best-effort client IP (Netlify sets x-nf-client-connection-ip). */
+/**
+ * Rate-limit key for the client (lib/ratelimit.js ipKey: Netlify's x-nf-client-connection-ip first;
+ * IPv6 reduced to its /64, IPv4-mapped IPv6 to IPv4).
+ */
 function clientIp(event) {
-  return header(event, 'x-nf-client-connection-ip') ||
-    String(header(event, 'x-forwarded-for') || '').split(',')[0].trim() || 'unknown';
+  return require('./ratelimit').ipKey((event && event.headers) || {});
 }
 
 /**
  * Best-effort in-memory throttle (per warm function instance only — NOT a
- * substitute for a durable store, but it raises the cost of naive brute force).
+ * substitute for a durable store; use lib/ratelimit.js hit() for that).
  * Returns true if the caller is over the limit.
+ *
+ * Memory is bounded (THROTTLE_MAX_KEYS). When full: expired buckets are dropped, then single-hit
+ * buckets (oldest first); a bucket with 2+ hits is never evicted, so flooding fresh keys cannot reset
+ * a live counter. If still full the new key is throttled (fail closed). Full scans happen at most
+ * once a second, so a flood can't make every call O(n).
  */
+const THROTTLE_MAX_KEYS = 10000;
 const buckets = new Map();
+let throttleNextScan = 0;
+function throttleRoom(now) {
+  if (buckets.size < THROTTLE_MAX_KEYS) return true;
+  if (now < throttleNextScan) return false;
+  for (const [k, v] of buckets) if (v.until <= now) buckets.delete(k);
+  if (buckets.size >= THROTTLE_MAX_KEYS) {
+    let toFree = Math.ceil(THROTTLE_MAX_KEYS / 10);
+    for (const [k, v] of buckets) {
+      if (toFree <= 0) break;
+      if (v.count <= 1) { buckets.delete(k); toFree--; }
+    }
+  }
+  if (buckets.size >= THROTTLE_MAX_KEYS) { throttleNextScan = now + 1000; return false; }
+  return true;
+}
 function throttled(key, max, windowMs) {
   const now = Date.now();
-  if (buckets.size > 5000) for (const [k, v] of buckets) if (v.until <= now) buckets.delete(k);
   let b = buckets.get(key);
-  if (!b || b.until <= now) { b = { count: 0, until: now + windowMs }; buckets.set(key, b); }
-  b.count++;
+  if (b && b.until <= now) { buckets.delete(key); b = null; }
+  if (!b) {
+    if (!throttleRoom(now)) return true;
+    b = { count: 0, until: now + windowMs };
+    buckets.set(key, b);
+  }
+  if (b.count <= max) b.count++;
   return b.count > max;
 }
 
@@ -321,6 +364,8 @@ function isJsonRequest(event) {
 }
 
 module.exports = {
+  MIN_SECRET_LEN,
+  secretConfigured,
   deriveKey,
   safeEqual,
   randomToken,
@@ -341,6 +386,7 @@ module.exports = {
   parseJsonBody,
   clientIp,
   throttled,
+  THROTTLE_MAX_KEYS,
   sleep,
   isJsonRequest,
 };
