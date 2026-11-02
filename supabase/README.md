@@ -6,7 +6,7 @@ anyone's progress. The fix moves all of that into Netlify functions that use the
 **service role key**, and then locks the tables so the public key can't touch them.
 
 New functions (in `deploy/netlify/functions/`): `auth-signup`, `auth-login`, `auth-session`,
-`progress`, `admin-users`. `reset-password` and `confirm-reset` use `public.password_resets` (created in Part A).
+`progress`, `admin-users`, `auth-delete`. `reset-password` and `confirm-reset` use `public.password_resets` (created in Part A).
 
 Files:
 
@@ -22,7 +22,7 @@ Database functions (all `SECURITY DEFINER`, callable **only** with the service k
 |---|---|---|
 | `rl_hit(p_key text, p_window_sec int, p_max int)` | new count (int) in the current fixed window; stops counting at `p_max + 1` | `lib/ratelimit.js` |
 | `create_user_with_code(p_email, p_name, p_pw_hash, p_code_hash, p_source, p_free, p_age_band, p_consent_version)` | `'ok'` / `'code_used'` / `'account_exists'` / `'code_invalid'`; all-or-nothing | `auth-signup` |
-| `delete_account(p_email text)` | jsonb counts | you, in the SQL editor; admin tools |
+| `delete_account(p_email text)` | jsonb counts | `auth-delete` (the app's "Delete my data" button); you, in the SQL editor |
 
 ## 1. Set the Netlify environment variables
 
@@ -35,6 +35,8 @@ Netlify → your site → **Site configuration → Environment variables → Add
 | `CODE_PEPPER` | a new random value, at least 32 characters: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` | Secret key for new access codes. Keep a copy in your password manager: you need the same value to generate codes. Changing it kills every unused new code. Shorter values are ignored, and then every new code is rejected. |
 | `LEGACY_CODES` | leave unset for now; set to `off` later | While unset, the 151 old codes still work, **each one once**. Their hashes are public and can be forged, so turn them off once you've sold/handed out new codes. |
 | `SUPABASE_URL` | optional | Defaults to `https://vtxuvmtnqlxidnswnunx.supabase.co`. |
+
+These are only the variables this SQL rollout depends on. The full list (Resend, admin hashes, map and RentCast keys, limits) is in [docs/ENV.md](../docs/ENV.md); the whole deployment is in [docs/SETUP.md](../docs/SETUP.md).
 
 After changing variables, redeploy (**Deploys → Trigger deploy → Deploy site**).
 
@@ -103,13 +105,18 @@ drop table if exists public.rate_counters;
 
 ## Deleting an account (parent requests, "delete my data")
 
+Signed-in users delete their own account with **Delete my data** on the Me/Profile page (`auth-delete`
+calls the function below). For a parent's request by email, run it yourself:
+
 ```sql
 select public.delete_account('child@example.com');
 ```
 
-It deletes the `users`, `progress` and `password_resets` rows and rate-limit counters for that email,
-and blanks the email in `code_redemptions` but **keeps the code hash** — so the code cannot be used
-again. Do **not** delete `code_redemptions` rows by hand: that makes the code redeemable again.
+It deletes the `users` and `progress` rows and the rate-limit counters keyed by that email, and blanks
+the email in `code_redemptions` but **keeps the code hash** — so the code cannot be used again.
+`password_resets` rows (and the reset rate-limit counters) store only a keyed hash of the email
+(`h1:…`), so they are not matched by email; they hold no address and are deleted by the daily job
+within 2 days. Do **not** delete `code_redemptions` rows by hand: that makes the code redeemable again.
 
 ## Retention
 

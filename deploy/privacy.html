@@ -93,11 +93,12 @@ footer a:hover { color:var(--mq-text); }
   <div class="card">
     <h3>The short version</h3>
     <ul>
-      <li>To make an account we ask your <strong>age</strong> (only to check you are 13 or older; the exact age is not saved), and collect a <strong>first name or nickname, email address and password</strong>. Passwords are never stored in plain text. Children under 13 cannot sign themselves up.</li>
+      <li>To make an account we ask your <strong>age</strong>, a <strong>first name or nickname</strong>, an <strong>email address</strong>, a <strong>password</strong> and an <strong>access code</strong>. We save only your age group (13 to 17, or 18 and older), never your exact age. Passwords are never stored in plain text.</li>
+      <li><strong>Children under 13 cannot sign themselves up.</strong> If someone picks "12 or younger", sign-up stops and nothing is sent to us.</li>
       <li>We save your <strong>learning and game progress</strong> so it follows you to other devices.</li>
       <li>We do <strong>not</strong> sell personal information, show ads, or use advertising or analytics trackers.</li>
       <li>The optional <strong>"Find my home"</strong> game feature uses a street address once to estimate a value. The address is <strong>not saved</strong>. We ask kids to use it only with a parent. See <a href="#home">section 5</a>.</li>
-      <li>Parents can review or delete their child's information at any time. See <a href="#children">section 8</a> and <a href="#contact">section 13</a>.</li>
+      <li>The <strong>"Delete my data"</strong> button on the Profile page permanently deletes the account and its saved data from our servers. Parents can also ask us to review or delete their child's information. See <a href="#children">section 8</a> and <a href="#contact">section 13</a>.</li>
     </ul>
   </div>
 
@@ -128,28 +129,32 @@ footer a:hover { color:var(--mq-text); }
   <div class="tbl"><table>
     <thead><tr><th scope="col">What</th><th scope="col">When</th><th scope="col">Where it is kept</th></tr></thead>
     <tbody>
-      <tr><td data-label="What">Age group (13 to 17, or 18 and older)</td><td data-label="When">Creating an account</td><td data-label="Where">Used to decide whether you can sign up yourself. Only the age group (never the exact age) is sent with the sign-up. Under 13, sign-up stops and nothing is sent to us; a note that the check failed stays in that browser tab only</td></tr>
-      <tr><td data-label="What">Name (as typed; we ask for a first name or nickname)</td><td data-label="When">Creating an account</td><td data-label="Where">Our database (Supabase) and your browser</td></tr>
-      <tr><td data-label="What">Email address</td><td data-label="When">Creating an account, signing in, resetting a password</td><td data-label="Where">Our database and your browser</td></tr>
-      <tr><td data-label="What">Password</td><td data-label="When">Creating an account or resetting a password</td><td data-label="Where">Only a one-way, salted hash is stored in our database, never the password itself</td></tr>
+      <tr><td data-label="What">Age group (13 to 17, or 18 and older)</td><td data-label="When">Creating an account</td><td data-label="Where">Saved with the account in our database (Supabase). The exact age is never sent or saved. If the user picks "12 or younger", sign-up stops and nothing is sent to us (see <a href="#device">section 4</a>)</td></tr>
+      <tr><td data-label="What">Agreement record: which version of the Terms and this policy was agreed to, and when</td><td data-label="When">Creating an account (the "I have read / I agree" box)</td><td data-label="Where">Our database, with the account</td></tr>
+      <tr><td data-label="What">Name (as typed; we ask for a first name or nickname)</td><td data-label="When">Creating an account</td><td data-label="Where">Our database and your browser</td></tr>
+      <tr><td data-label="What">Email address</td><td data-label="When">Creating an account, signing in</td><td data-label="Where">Our database and your browser</td></tr>
+      <tr><td data-label="What">Password</td><td data-label="When">Creating an account or resetting a password</td><td data-label="Where">Only a one-way hash is stored in our database, never the password itself. New and changed passwords use salted scrypt. Accounts made with an older version of the app keep a weaker, older hash until their next sign-in, when it is upgraded automatically</td></tr>
       <tr><td data-label="What">Access code</td><td data-label="When">Creating an account</td><td data-label="Where">Checked by our server. A record that the code was used (a one-way hash of the code, the account email and the date) is kept in our database so each code works only once</td></tr>
+      <tr><td data-label="What">Email typed into "Forgot password"</td><td data-label="When">Asking for a password-reset code</td><td data-label="Where">The email is used to send the code. Our database keeps a short record of the request (a scrambled, one-way version of the email, the time, and how many tries were made), never the code itself, and deletes it within 2 days. This happens even if no account uses that email, so the answer never reveals whether an account exists</td></tr>
       <tr><td data-label="What">Lesson notes (free text you type)</td><td data-label="When">Using the notes feature</td><td data-label="Where">Our database and your browser</td></tr>
-      <tr><td data-label="What">A street address, and optionally bedrooms and square feet</td><td data-label="When">Only if you use "Find my home"</td><td data-label="Where">See <a href="#home">section 5</a></td></tr>
+      <tr><td data-label="What">A street address, and optionally bedrooms and square feet</td><td data-label="When">Only if you use "Find my home"</td><td data-label="Where">Not saved. See <a href="#home">section 5</a></td></tr>
     </tbody>
   </table></div>
-  <p>Please do not type personal details (such as a phone number, school or home address) into lesson notes.</p>
+  <p>Please do not type personal details (such as a phone number, school or home address) into lesson notes or other text boxes. We do not filter what is typed there.</p>
 
   <h3>Information created as you play</h3>
   <p>Completed lessons, quiz results, XP, stars, stickers, trophies, settings, and your pretend portfolios (stocks, crypto, bonds, bank, loans and Money City properties). This is saved in your browser and in our database so your progress syncs across devices.</p>
 
   <h3>Information collected automatically</h3>
-  <p>Like every website, our hosting provider (Netlify) and the services listed in <a href="#third">section 7</a> receive your <strong>IP address</strong>, browser type and the pages or files requested when your browser connects to them. Our server functions use IP addresses briefly, in memory, to limit abuse (for example, too many sign-in attempts). We do <strong>not</strong> use cookies for tracking, advertising networks, or analytics tools such as Google Analytics.</p>
-  <p>We do <strong>not</strong> ask for your birthday, phone number, photo, voice, or precise location from your device's GPS. The read-aloud feature in Junior Quest uses your device's built-in speech feature.</p>
+  <p>Like every website, our hosting provider (Netlify) and the services listed in <a href="#third">section 7</a> receive your <strong>IP address</strong>, browser type and the pages or files requested when your browser connects to them.</p>
+  <p>To stop abuse (for example, someone guessing passwords), our server counts requests. Each counter is labeled with an IP address (for newer IPv6 addresses, only the network part, not the full address) or with an account email, and holds only a number and a time window. Counters are kept in our database and deleted automatically within 2 days. If a request looks like an attack and is blocked, its IP address is written to our hosting provider's server log.</p>
+  <p>We do <strong>not</strong> use cookies for tracking, advertising networks, or analytics tools such as Google Analytics. We do <strong>not</strong> ask for your birthday, phone number, photo, voice, or your device's GPS location. The read-aloud feature in Junior Quest uses your browser's built-in speech feature (some browsers use an online voice from the browser maker).</p>
 
   <h2 id="use">3. How we use information</h2>
   <ul>
     <li>To create your account, sign you in and keep you signed in.</li>
     <li>To save and sync your progress, notes and game state.</li>
+    <li>To record the age group and agreement given at sign-up.</li>
     <li>To send password-reset codes by email (the only emails we send).</li>
     <li>To check access codes and keep track of which codes have been used.</li>
     <li>To estimate pretend home values and show maps in the Money City game.</li>
@@ -158,18 +163,20 @@ footer a:hover { color:var(--mq-text); }
   <p>We do not use personal information for advertising, we do not build marketing profiles, and we do not sell or rent it to anyone.</p>
 
   <h2 id="device">4. What stays on your device</h2>
-  <p>The app saves information in your browser's local storage so it works quickly and offline. This includes your sign-in token and the name and email shown in the app, your progress and game state, lesson notes, sound and graphics settings, and a short count of in-app activity (it contains no names, emails or addresses). Some temporary items (such as the admin sign-in attempt limit and the result of the age check) use session storage and clear when you close the tab.</p>
-  <p><strong>Signing out removes your progress, notes, game saves and sign-in from that browser</strong> (they stay saved in your account). The <strong>"Delete my data"</strong> button on the Profile page does the same without needing to sign in again first. Sound and graphics settings stay. Deleting your account and its cloud copy is done on request (see <a href="#rights">section 9</a>).</p>
+  <p>The app saves information in your browser's local storage so it works quickly. This includes your sign-in token and the name and email shown in the app, your progress and game state, lesson notes, sound and graphics settings, and a list of up to 1,000 recent in-app actions with their times (for example "finished a lesson"; it contains no names, emails or addresses and is never sent to us). Some temporary items (such as the owner's admin sign-in) use session storage, which clears when the tab is closed.</p>
+  <p>If someone picks "12 or younger" at sign-up, the browser remembers that so sign-up stays blocked on that device. This note never leaves the browser.</p>
+  <p><strong>Signing out removes your progress, notes, game saves and sign-in from that browser</strong> (they stay saved in your account). <strong>"Delete my data"</strong> on the Profile page deletes your account and everything saved with it from our servers, and also removes it from that browser. Sound and graphics settings stay on the device.</p>
 
   <h2 id="home">5. "Find my home" and maps</h2>
   <p>Money City has an optional Pro Quest feature called "Find my home" that estimates what a real home might be worth.</p>
   <ul>
-    <li>When you use it, the address you type is sent to our server, which sends it to the <strong>U.S. Census Bureau Geocoder</strong> to find the location and neighborhood, and, if enabled, to <strong>RentCast</strong> for a value estimate. Our server keeps results in temporary memory for up to about an hour to avoid repeat lookups and does not log or write the address to our database.</li>
-    <li><strong>The street address, ZIP code and exact location are not saved</strong>, in your browser or in our database. If you "buy" that home in the game, it is saved with your game progress as "My home", with its estimated value, the city and state, and a map position rounded to about 1 km (0.01°). Homes saved by older versions of the app are cleaned the same way the next time the app opens.</li>
-    <li>Map searches for cities, ZIP codes or addresses go through our server to <strong>OpenStreetMap Nominatim</strong> and the Census Geocoder. When the map is open, your browser loads map pictures from a map tile provider and asks <strong>Overpass</strong> (OpenStreetMap) servers for building data for the area on screen. These services see your IP address and the area you are viewing.</li>
+    <li>When you use it, the address you type is sent to our server (inside the request, not in the web address), which sends it to the <strong>U.S. Census Bureau Geocoder</strong> to find the location and neighborhood, and, if enabled, to <strong>RentCast</strong> for a value estimate. To avoid repeat lookups, our server keeps results in temporary memory for up to 1 hour. It does not log the address or write it to our database, and it tells your browser not to keep a copy.</li>
+    <li><strong>The street address, ZIP code and exact location are not saved</strong>, in your browser or in our database. The map moves to a point about 1 km (0.01°) from the home, not to the house itself. If you "buy" that home in the game, it is saved with your game progress as "My home", with its estimated value, the city and state, and that rounded map position. Homes saved by older versions of the app are cleaned the same way the next time the account opens the app.</li>
+    <li>Map searches for cities, ZIP codes or addresses are sent by our server to <strong>OpenStreetMap Nominatim</strong> and the Census Geocoder. A searched street address also only moves the map near the address, not onto it. Search results are kept in temporary server memory for up to 20 minutes and are not logged.</li>
+    <li>When the map is open, your browser loads map pictures from a map tile provider and asks <strong>Overpass</strong> (OpenStreetMap) servers for building data for the area on screen. These services see your IP address and the area you are viewing.</li>
   </ul>
   <div class="card note">
-    <p style="margin:0"><strong>Kids:</strong> please only use "Find my home" with a parent or guardian. <strong>Parents:</strong> the feature does not save your address, and you can ask us to delete any game data at any time (see <a href="#contact">section 13</a>).</p>
+    <p style="margin:0"><strong>Kids:</strong> please only use "Find my home" with a parent or guardian. <strong>Parents:</strong> the feature does not save your address, and you can delete any game data at any time (see <a href="#rights">section 9</a>).</p>
   </div>
 
   <h2 id="share">6. Who we share information with</h2>
@@ -177,60 +184,63 @@ footer a:hover { color:var(--mq-text); }
   <p>The site owner can see the list of accounts (name, email, account type and sign-up date) to manage access codes and support.</p>
 
   <h2 id="third">7. Third-party services</h2>
-  <p>Each of these services has its own privacy policy. None of them receive your password.</p>
+  <p>Each of these services has its own privacy policy. None of them receive your password. The code that runs the app (including the React, Leaflet and three.js libraries) and its styles are served from our own site, not from outside code servers.</p>
   <div class="tbl"><table>
     <thead><tr><th scope="col">Service</th><th scope="col">What it does</th><th scope="col">What it receives</th></tr></thead>
     <tbody>
-      <tr><td data-label="Service">Netlify</td><td data-label="Does">Hosts the website and runs our server functions</td><td data-label="Receives">IP address and request details</td></tr>
-      <tr><td data-label="Service">Supabase</td><td data-label="Does">Our database</td><td data-label="Receives">Account details (name, email, password hash) and saved progress, notes and game state</td></tr>
-      <tr><td data-label="Service">Resend</td><td data-label="Does">Sends password-reset emails</td><td data-label="Receives">Your email address and the reset code</td></tr>
-      <tr><td data-label="Service">Stripe</td><td data-label="Does">Handles subscription payments on Stripe's own checkout page</td><td data-label="Receives">Whatever you enter on Stripe's page. Payment card details go to Stripe, never to us</td></tr>
+      <tr><td data-label="Service">Netlify</td><td data-label="Does">Hosts the website and runs our server functions</td><td data-label="Receives">IP address and request details. Its server logs include the IP address of any request our server blocks as suspicious</td></tr>
+      <tr><td data-label="Service">Supabase</td><td data-label="Does">Our database</td><td data-label="Receives">Account details (name, email, password hash, age group, agreement record), saved progress, notes and game state, access-code use records, password-reset records and abuse counters (see <a href="#collect">section 2</a>)</td></tr>
+      <tr><td data-label="Service">Resend</td><td data-label="Does">Sends password-reset emails</td><td data-label="Receives">Your email address, the first name or nickname on the account, and the reset code</td></tr>
+      <tr><td data-label="Service">Stripe</td><td data-label="Does">Handles subscription payments on Stripe's own checkout page (we only link to it)</td><td data-label="Receives">Whatever you enter on Stripe's page. Payment card details go to Stripe, never to us</td></tr>
       <tr><td data-label="Service">Google Fonts</td><td data-label="Does">Provides the fonts on our pages</td><td data-label="Receives">IP address and browser details</td></tr>
-      <tr><td data-label="Service">unpkg and the Tailwind CSS CDN</td><td data-label="Does">Deliver the code libraries the app uses (React, Leaflet maps, three.js, styles)</td><td data-label="Receives">IP address and browser details</td></tr>
       <tr><td data-label="Service">OpenStreetMap tiles, MapTiler or Stadia Maps</td><td data-label="Does">Map pictures in Money City</td><td data-label="Receives">IP address and the map area you view</td></tr>
-      <tr><td data-label="Service">Overpass API servers (overpass-api.de, overpass.private.coffee, overpass.kumi.systems)</td><td data-label="Does">Building data for the map</td><td data-label="Receives">The map area you view; your IP address when your browser asks directly</td></tr>
+      <tr><td data-label="Service">Overpass API servers (overpass-api.de, overpass.private.coffee)</td><td data-label="Does">Building data for the map</td><td data-label="Receives">The map area you view, and your IP address (your browser asks them directly). Our server may also ask them for an area, without your IP address</td></tr>
       <tr><td data-label="Service">OpenStreetMap Nominatim</td><td data-label="Does">Place and ZIP-code search</td><td data-label="Receives">The search text, sent by our server (not your IP)</td></tr>
-      <tr><td data-label="Service">U.S. Census Bureau Geocoder</td><td data-label="Does">Finds addresses and neighborhoods</td><td data-label="Receives">The address or search text, sent by our server</td></tr>
-      <tr><td data-label="Service">RentCast (only if enabled)</td><td data-label="Does">Home value estimates and sample listings</td><td data-label="Receives">The matched address or map area, sent by our server</td></tr>
+      <tr><td data-label="Service">U.S. Census Bureau Geocoder</td><td data-label="Does">Finds addresses and neighborhoods</td><td data-label="Receives">The address or search text, or the center of the map area, sent by our server (not your IP)</td></tr>
+      <tr><td data-label="Service">RentCast (only if enabled)</td><td data-label="Does">Home value estimates and sample listings</td><td data-label="Receives">The matched address ("Find my home"), or a map position rounded to about 1 km (listings), sent by our server (not your IP)</td></tr>
       <tr><td data-label="Service">Yahoo Finance and CoinGecko</td><td data-label="Does">Market prices for the simulators</td><td data-label="Receives">Only ticker symbols, requested by our server. No personal information</td></tr>
-      <tr><td data-label="Service">Google Forms</td><td data-label="Does">The optional "Feedback" button opens a Google Form</td><td data-label="Receives">Only what you choose to type into the form</td></tr>
+      <tr><td data-label="Service">Google Forms</td><td data-label="Does">The optional "Feedback" button (shown in Pro Quest only, never in Junior Quest) opens a Google Form in a new tab</td><td data-label="Receives">What you type into the form, plus what Google collects from any visit to its sites (such as your IP address and Google cookies)</td></tr>
     </tbody>
   </table></div>
 
   <h2 id="children">8. Children's privacy (COPPA notice for parents)</h2>
   <div class="card kids">
-    <p>Money Quest is built for young learners, including children under 13, so we follow the U.S. Children's Online Privacy Protection Act (COPPA) principles below. This section is our notice to parents.</p>
+    <p>Money Quest is built for young learners, including children under 13 (Junior Quest), so we follow the U.S. Children's Online Privacy Protection Act (COPPA) principles below. This section is our notice to parents.</p>
   </div>
   <h3>What we collect from children and why</h3>
-  <p>The same information described in <a href="#collect">section 2</a>: a name, an email address and password to make an account, progress and game data, any lesson notes the child types, and (only if used) a home address for "Find my home". We use it only to run the learning game for the child, as described in <a href="#use">section 3</a>. We do not require a child to give more information than is reasonably needed to take part, and children cannot post information publicly or chat with other users in Money Quest.</p>
-  <h3>Parental consent</h3>
-  <p>A child under 13 should not create an account or use Money Quest without a parent's or guardian's permission. Accounts are created with a purchased access code, and we expect a parent, guardian or teacher to set up and manage accounts for children under 13. A school may consent on behalf of parents when Money Quest is used only for classroom learning.</p>
-  <p>Sign-up asks for the user's age first. If the user is 12 or younger, sign-up stops before any name, email or password is asked for, nothing is sent to us, and the user is asked to have a parent or teacher set up the account. Users aged 13 to 17 confirm they have read the Terms and this policy with a parent or guardian. If we learn that we collected personal information from a child under 13 without a parent's consent, we will delete it.</p>
-  <h3>Parents' rights</h3>
-  <p>A parent or guardian of a child under 13 can, at any time:</p>
+  <p>The same information described in <a href="#collect">section 2</a>: a name, an email address and password to make an account, the age group and agreement record, progress and game data, any lesson notes the child types, and (only if used) a home address for "Find my home", which is not saved. We use it only to run the learning game, as described in <a href="#use">section 3</a>. We do not require a child to give more information than is reasonably needed to take part, and children cannot post information publicly or chat with other users in Money Quest.</p>
+  <h3>Sign-up and parental consent</h3>
+  <p>Sign-up asks for the user's age first. <strong>If the user is 12 or younger, sign-up stops</strong> before any name, email or password is asked for, nothing is sent to us, and the child is asked to have a parent or teacher set up Money Quest. Children under 13 cannot create their own account.</p>
+  <p>A parent, guardian or teacher may create an account with their own details and age, and let a child play on it with them. We do not collect a separate record from or about the child in that case; the account is the adult's, and the adult agrees to the Terms and this policy for the child. A school may do this on behalf of parents when Money Quest is used only for classroom learning.</p>
+  <p>Users aged 13 to 17 must tick a box confirming they read the Terms and this policy with a parent or guardian and that they both agree. We save their age group (13 to 17), the version of the Terms and policy they agreed to, and the date and time.</p>
+  <p>If we learn that we collected personal information from a child under 13 without a parent's consent, we will delete it.</p>
+  <h3 id="parents">How parents can review or delete data</h3>
+  <p>A parent or guardian can, at any time:</p>
   <ul>
+    <li><strong>Delete</strong> the account and everything saved with it right away, using <strong>"Delete my data"</strong> on the Profile page while signed in, or ask us to do it.</li>
     <li><strong>Review</strong> the personal information we hold about their child.</li>
     <li><strong>Correct</strong> it, or ask us to correct it.</li>
-    <li><strong>Delete</strong> it, including the account, progress, notes and any saved home address.</li>
-    <li><strong>Revoke consent</strong> and stop any further collection or use of their child's information. This closes the child's account, because the game cannot save progress without it.</li>
+    <li><strong>Revoke consent</strong> and stop any further collection or use of their child's information. This closes the account, because the game cannot save progress without it.</li>
   </ul>
-  <p>To make a request, contact us as described in <a href="#contact">section 13</a>. Tell us the child's account email. To protect the child, we will take reasonable steps to confirm that you are the parent or guardian before we share or change anything. We will respond within 30 days, usually much sooner. We will also remove the child's email from our access-code use records (only a one-way hash of the code is kept, so the code cannot be used again).</p>
+  <p>To make a request, contact us as described in <a href="#contact">section 13</a>. Tell us the account email. To protect the child, we will take reasonable steps to confirm that you are the parent or guardian before we share or change anything. We will respond within 30 days, usually much sooner. When an account is deleted, the access-code use record keeps only a one-way hash of the code (so the code cannot be used again) and the email is removed from it.</p>
 
   <h2 id="rights">9. Your choices and rights</h2>
   <ul>
-    <li><strong>Access, correct or delete:</strong> anyone (not only parents) can ask us for a copy of their information, to fix it, or to delete their account and data. Contact us (section 13).</li>
-    <li><strong>Local data:</strong> signing out or using "Delete my data" on the Profile page removes your information from that browser. You can also clear it from your browser's settings.</li>
+    <li><strong>Delete:</strong> "Delete my data" on the Profile page permanently deletes your account, progress, notes, game saves and agreement record from our database, and removes them from that browser. It cannot be undone, and the access code will not work again.</li>
+    <li><strong>Access or correct:</strong> anyone (not only parents) can ask us for a copy of their information or to fix it. Contact us (section 13).</li>
+    <li><strong>Local data:</strong> signing out removes your information from that browser (it stays in your account). You can also clear it from your browser's settings.</li>
     <li><strong>Optional features:</strong> you do not have to use "Find my home", lesson notes or the feedback form.</li>
     <li>Depending on where you live (for example, California or the European Economic Area), you may have additional rights. Contact us and we will honor them as the law requires.</li>
   </ul>
 
   <h2 id="retention">10. How long we keep information</h2>
   <ul>
-    <li><strong>Account, progress and notes:</strong> while the account exists. When an account is deleted, we delete its data from our database within 30 days. Copies in a hosting provider's routine backups may take up to an additional 30 days to expire.</li>
-    <li><strong>Access-code use records</strong> (our database): kept to prevent a code from being reused. The email is removed on request; the code hash is kept so the code cannot be used again.</li>
-    <li><strong>Password-reset codes:</strong> expire after 15 minutes and are not stored in our database.</li>
-    <li><strong>Sign-in sessions:</strong> expire after 30 days of not being renewed.</li>
-    <li><strong>"Find my home" lookups:</strong> kept only in temporary server memory (up to about an hour). Buying the home in the game saves it without its address (see <a href="#home">section 5</a>).</li>
+    <li><strong>Account, age group, agreement record, progress and notes:</strong> while the account exists. "Delete my data" deletes them from our database immediately. Requests sent to us are completed within 30 days. Copies in our database provider's routine backups expire on the provider's own schedule.</li>
+    <li><strong>Access-code use records:</strong> kept to prevent a code from being reused. When the account is deleted the email is removed; the code hash is kept so the code cannot be used again.</li>
+    <li><strong>Password-reset requests:</strong> the 6-digit code expires after 15 minutes and is never stored. The request record (a one-way version of the email, the time and the number of tries) is deleted within 2 days.</li>
+    <li><strong>Abuse counters</strong> (labeled with an IP address, an IPv6 network or an email): deleted automatically within 2 days.</li>
+    <li><strong>Sign-in sessions:</strong> a sign-in lasts up to 30 days and is renewed while you keep using the app. Changing your password or deleting the account ends every sign-in at once.</li>
+    <li><strong>"Find my home" lookups and map searches:</strong> kept only in temporary server memory, for up to 1 hour. Buying the home in the game saves it without its address (see <a href="#home">section 5</a>).</li>
     <li><strong>Server and hosting logs:</strong> kept by Netlify for a limited time under its own policies.</li>
     <li><strong>Browser storage:</strong> stays on your device until you sign out, use "Delete my data", or clear it.</li>
   </ul>
@@ -240,11 +250,12 @@ footer a:hover { color:var(--mq-text); }
   <p>We take reasonable steps to protect information, including:</p>
   <ul>
     <li><strong>Encrypted connections:</strong> the whole site is served only over HTTPS, and HTTP Strict Transport Security (HSTS) tells browsers never to connect without encryption.</li>
-    <li><strong>Server-side accounts:</strong> sign-up and sign-in are checked by our server, which issues a signed sign-in token. The web page never reads or writes our database directly, and the server only returns or changes the progress of the account the token belongs to.</li>
-    <li><strong>Hashed passwords:</strong> passwords are stored only as one-way hashes, never in plain text. We use salted scrypt hashing for new and updated passwords and upgrade older accounts' hashes when they sign in.</li>
-    <li><strong>Encrypted reset tokens:</strong> password-reset verification tokens are encrypted and authenticated with AES-256-GCM and expire after 15 minutes.</li>
-    <li><strong>Abuse limits:</strong> sign-in, sign-up, password-reset and progress-saving requests are rate-limited on our server.</li>
-    <li><strong>Secrets on the server:</strong> service keys and admin credentials are kept in server settings, not in the web page.</li>
+    <li><strong>Server-side accounts:</strong> sign-up and sign-in are checked by our server, which issues a sign-in token signed with HMAC-SHA256. The web page never reads or writes our database directly. The database is locked so that only our server can reach it, and the server only returns or changes the data of the account the token belongs to.</li>
+    <li><strong>Hashed passwords and codes:</strong> passwords are stored only as one-way hashes, never in plain text. New and changed passwords use salted scrypt, and older accounts' hashes are upgraded when they sign in. New access codes and password-reset records are stored only as keyed one-way hashes.</li>
+    <li><strong>Encrypted reset tokens:</strong> password-reset tokens are encrypted and authenticated with AES-256-GCM and expire after 15 minutes. A code can be guessed at most 5 times.</li>
+    <li><strong>Abuse limits:</strong> sign-in, sign-up, password-reset, data-saving and map requests are rate-limited by counters shared by all of our servers, and a request filter blocks common attack patterns before they reach our code.</li>
+    <li><strong>No outside code:</strong> every script the app runs comes from our own site, and our Content Security Policy tells browsers to refuse scripts from anywhere else.</li>
+    <li><strong>Secrets on the server:</strong> database keys, signing keys and admin credentials are kept in server settings, not in the web page.</li>
   </ul>
   <p>No system is perfectly secure. If we learn of a security incident that affects your information, we will notify affected users (and parents, for children's accounts) as the law requires. To report a security problem, see the SECURITY policy on our <a href="https://github.com/merrickfluellen/Next-Gen-Wealth-Project" rel="noopener">GitHub repository</a>.</p>
 
