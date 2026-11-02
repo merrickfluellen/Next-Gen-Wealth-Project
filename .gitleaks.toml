@@ -1,0 +1,17 @@
+title = "MoneyQuest gitleaks config"
+
+# Start from gitleaks' built-in rule set.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Values that are public by design"
+regexes = [
+  # Supabase publishable (anon) key: shipped to the browser on purpose;
+  # data access is enforced by Row Level Security, not by hiding this key.
+  '''sb_publishable_[A-Za-z0-9_-]+''',
+]
+paths = [
+  # Static real-estate reference data, not credentials.
+  '''deploy/netlify/functions/lib/re-data\.json''',
+]

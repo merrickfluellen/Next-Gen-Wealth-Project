@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Syntax and config checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: node --check every Netlify function
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r -d '' f; do
+            node --check "$f" || { echo "::error file=$f::syntax error"; status=1; }
+          done < <(find deploy/netlify/functions -name '*.js' -print0)
+          exit $status
+
+      - name: Validate deploy/netlify.toml
+        run: python3 -c 'import tomllib; tomllib.load(open("deploy/netlify.toml","rb")); print("netlify.toml OK")'
+
+      - name: Validate JSON files
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r -d '' f; do
+            python3 -m json.tool "$f" > /dev/null || { echo "::error file=$f::invalid JSON"; status=1; }
+          done < <(find . -name '*.json' -not -path './.git/*' -not -path '*/node_modules/*' -print0)
+          exit $status
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
