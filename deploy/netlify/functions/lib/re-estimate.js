@@ -7,8 +7,18 @@
  *     taxes paid, B25018 median rooms, B25035 median year built.
  *   - FHFA All-Transactions House Price Index by state: `factor` = latest quarter ÷ 2022–2024 average
  *     (brings ACS values forward to today), `appr` = 3-year annualized growth (clamped 1%–6%).
- * Optional paid data: RentCast API (env RENTCAST_API_KEY) — AVM values, rent AVM, real for-sale listings.
- *   Paid calls are cached (24 h) and capped per warm instance (env RENTCAST_MAX_CALLS_PER_HOUR, default 40).
+ * Optional paid data: RentCast API (env RENTCAST_API_KEY) — AVM value and real for-sale listings.
+ *   Every paid call must pass, in order: the in-memory answer cache (1 h; a hit costs nothing), the
+ *   caller's per-client gate (lib/ratelimit.js hit(), durable, fails closed), and the SITE-WIDE hourly
+ *   budget (lib/ratelimit.js budget('rentcast'), one counter shared by every instance and by both
+ *   re-value and re-listings; fails closed, so no DB → no paid calls).
+ *   RENTCAST_MAX_CALLS_PER_HOUR (parsed strictly):
+ *     unset or ""          → 40 calls/hour
+ *     1–6 digits (≥ 0)     → that many per hour (capped at 10000); "0" turns paid calls OFF
+ *     anything else        → OFF (e.g. "-1", "5.5", "abc", "40/h") — a typo can't mean "unlimited"
+ *   With the key unset or the cap at 0, hasRentcast() is false and no paid code runs at all.
+ *   Cache keys are normalised (lower-case, single spaces); listings are fetched for a center snapped
+ *   to a 0.01° grid with one fixed radius, so nearby map views share one paid call.
  *
  * Rules: never invent negative facts about a real home (condition only Excellent/Good/Average,
  * no school/crime ratings). Everything is deterministic per address (no Math.random).
@@ -18,7 +28,8 @@
  */
 
 const DATA = require('./re-data.json');
-const { fetchJson, makeCache, cleanText, validLatLng, USER_AGENT } = require('./geo');
+const { fetchJson, makeCache, cleanText, validLatLng, USER_AGENT, str } = require('./geo');
+const RL = require('./ratelimit');
 
 const own = (obj, k) => (obj && typeof k === 'string' && Object.prototype.hasOwnProperty.call(obj, k)) ? obj[k] : undefined;
 
@@ -49,7 +60,7 @@ const r25 = (v) => Math.round(v / 25) * 25;
 const dayNum = () => Math.floor(Date.now() / 86400000);
 const THIS_YEAR = () => new Date().getUTCFullYear();
 // A finite number inside [lo, hi], else 0 (= "unknown", callers fall back to an estimate)
-const numIn = (v, lo, hi) => { if (v == null || v === '' || typeof v === 'boolean') return 0; const n = Number(v); return isFinite(n) && n >= lo && n <= hi ? n : 0; };
+const numIn = (v, lo, hi) => { if (typeof v !== 'number' && typeof v !== 'string') return 0; if (v === '') return 0; const n = Number(v); return isFinite(n) && n >= lo && n <= hi ? n : 0; };
 const posNum = (v) => { const n = Number(v); return isFinite(n) && n > 0 ? n : 0; };
 
 // ── ACS lookup: tract → county → state → US, field by field ───────────────────
@@ -96,7 +107,7 @@ function estimateHome(h, opts = {}) {
   h = h || {};
   const st = stateAb(h.state);
   const a = acsFor(h.geo, st);
-  const key = String(h.address || '').toLowerCase() + '|' + String(h.zip || h.city || '').toLowerCase();
+  const key = str(h.address).toLowerCase() + '|' + (str(h.zip) || str(h.city)).toLowerCase();
   const rng = rngFrom(hash(key));
   const type = TYPES.has(h.type) ? h.type : (typeof h.osmBuilding === 'string' && OSM_TYPE.get(h.osmBuilding)) || 'Single Family';
 
@@ -130,13 +141,13 @@ function estimateHome(h, opts = {}) {
   const price = condition === 'Average' ? r1000(arv * 0.92) : arv;
   const repairCost = condition === 'Average' ? r1000((arv - price) * 0.6) : 0;
   const spread = numIn(opts.spread, 0.01, 0.9) || 0.2;
-  const lat = Number(h.lat), lng = Number(h.lng);
-  const domN = h.daysOnMarket == null || h.daysOnMarket === '' ? NaN : Number(h.daysOnMarket);
+  const lat = numIn(h.lat, -90, 90) || (h.lat === 0 ? 0 : NaN), lng = numIn(h.lng, -180, 180) || (h.lng === 0 ? 0 : NaN);
+  const domN = typeof h.daysOnMarket === 'number' || typeof h.daysOnMarket === 'string' ? numIn(h.daysOnMarket, 0, 3650) || (Number(h.daysOnMarket) === 0 ? 0 : NaN) : NaN;
   const hasDom = !!h.forSale && isFinite(domN) && domN >= 0 && domN <= 3650;
 
   return {
     id: 're_' + hash(key).toString(36),
-    address: cleanText(h.address, 120), city: cleanText(h.city, 60), state: st || a.stateAb || '', zip: String(h.zip || '').replace(/\D/g, '').slice(0, 5),
+    address: cleanText(h.address, 120), city: cleanText(h.city, 60), state: st || a.stateAb || '', zip: str(h.zip).replace(/\D/g, '').slice(0, 5),
     lat: isFinite(lat) ? +lat.toFixed(6) : null, lng: isFinite(lng) ? +lng.toFixed(6) : null,
     type, condition, beds, baths, sqft, yearBuilt,
     price, arv, repairCost, estimatedRent: rent,
@@ -148,7 +159,7 @@ function estimateHome(h, opts = {}) {
     schoolRating: null, crimeRating: null,
     appreciationRate: a.appr,
     photoSeed: hash(key) % 999 + 1,
-    source: h.source || 'census-estimate', forSale: !!h.forSale, synthetic: !!h.synthetic,
+    source: str(h.source) || 'census-estimate', forSale: !!h.forSale, synthetic: !!h.synthetic,
     valueLow: r1000(value * (1 - spread)), valueHigh: r1000(value * (1 + spread)),
     dataLevel: a.level,
   };
@@ -157,25 +168,43 @@ function estimateHome(h, opts = {}) {
 // ── RentCast (only when RENTCAST_API_KEY is set) ──────────────────────────────
 const RC_BASE = 'https://api.rentcast.io/v1';
 const rcKey = () => process.env.RENTCAST_API_KEY || '';
-const _rcCache = makeCache(24 * 60 * 60 * 1000, 1000);   // paid answers: reuse for a day
-const _rcBudget = { start: 0, n: 0 };
-function rcBudgetOk() {
-  const max = Math.max(0, Math.floor(Number(process.env.RENTCAST_MAX_CALLS_PER_HOUR)) || 40);
-  const now = Date.now();
-  if (now - _rcBudget.start >= 3600000) { _rcBudget.start = now; _rcBudget.n = 0; }
-  if (_rcBudget.n >= max) return false;
-  _rcBudget.n++;
-  return true;
+// Paid answers are reused for 1 hour (the privacy policy promises lookups are kept "about an hour").
+const RC_CACHE_TTL_MS = 60 * 60 * 1000;
+const _rcCache = makeCache(RC_CACHE_TTL_MS, 1000);
+const RC_DEFAULT_PER_HOUR = 40;
+const RC_MAX_BYTES = 1024 * 1024;        // a 40-listing or AVM answer is tens of KB
+
+/** RENTCAST_MAX_CALLS_PER_HOUR, strictly: unset/"" → 40; digits → that number (≤ 10000; "0" = off); else → 0 (off). */
+function rcMaxPerHour() {
+  const raw = process.env.RENTCAST_MAX_CALLS_PER_HOUR;
+  if (raw === undefined || String(raw).trim() === '') return RC_DEFAULT_PER_HOUR;
+  const s = String(raw).trim();
+  if (!/^\d{1,6}$/.test(s)) return 0;
+  return Math.min(10000, Number(s));
 }
-async function rc(path, params, timeoutMs = 7000) {
-  if (!rcKey()) return null;
-  const qs = Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+const hasRentcast = () => !!rcKey() && rcMaxPerHour() > 0;
+
+/** Address → lower-case + single spaces, so "400 Grand Blvd" and "400  GRAND blvd" share one cache entry / paid call. */
+const normParam = (k, v) => (k === 'address' ? String(v).trim().toLowerCase().replace(/\s+/g, ' ') : String(v));
+
+/**
+ * One RentCast GET. Returns parsed JSON or null (no key, over a limit, out of time, upstream error).
+ * @param {() => Promise<boolean>} [gate]  per-client check, run ONLY on a cache miss (= a billable call)
+ */
+async function rc(path, params, timeoutMs = 7000, gate) {
+  if (!hasRentcast()) return null;
+  const t0 = Date.now();
+  const qs = Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => k + '=' + encodeURIComponent(normParam(k, v))).join('&');
   const ck = path + '?' + qs;
   const hit = _rcCache.get(ck);
   if (hit !== undefined) return hit;
-  if (!rcBudgetOk()) return null;
+  if (gate && !(await gate())) return null;                                   // per-client cap
+  const b = await RL.budget('rentcast', { windowSec: 3600, max: rcMaxPerHour() });  // site-wide cap, fails closed
+  if (!b || !b.ok) return null;
+  const left = timeoutMs - (Date.now() - t0);
+  if (left < 800) return null;
   // redirect:'error' → the X-Api-Key header can never follow a redirect to another host
-  const j = await fetchJson(RC_BASE + ck, { timeoutMs, redirect: 'error', headers: { 'X-Api-Key': rcKey() } });
+  const j = await fetchJson(RC_BASE + ck, { timeoutMs: left, redirect: 'error', maxBytes: RC_MAX_BYTES, headers: { 'X-Api-Key': rcKey() } });
   if (j !== null) _rcCache.set(ck, j);   // don't cache network / HTTP failures
   return j;
 }
@@ -185,7 +214,7 @@ const rcType = (t) => (typeof t === 'string' && RC_TYPE.get(t)) || '';
 /** RentCast /listings/sale item → Property (real for-sale listing) */
 function fromRentcastListing(x, geo) {
   if (!x || typeof x !== 'object' || x.propertyType === 'Land') return null;
-  const lat = Number(x.latitude), lng = Number(x.longitude);
+  const lat = numIn(x.latitude, -90, 90), lng = numIn(x.longitude, -180, 180);
   const rawPrice = numIn(x.price, 1000, 1e9);
   if (!validLatLng(lat, lng) || !rawPrice) return null;
   const address = cleanText(x.addressLine1 || x.formattedAddress, 120);
@@ -196,7 +225,7 @@ function fromRentcastListing(x, geo) {
   const price = r1000(rawPrice);
   const hoaFee = x.hoa && typeof x.hoa === 'object' ? numIn(x.hoa.fee, 1, 20000) : 0;
   return Object.assign(base, {
-    id: 're_rc_' + hash(String(x.id || x.formattedAddress || address)).toString(36),
+    id: 're_rc_' + hash(str(x.id) || str(x.formattedAddress) || address).toString(36),
     price, arv: price, repairCost: 0, condition: 'Good',
     taxes: Math.round(price * (base.taxes * 12 / Math.max(1, base.arv)) / 12), insurance: Math.round(price * 0.005 / 12),
     hoa: hoaFee ? Math.round(hoaFee) : base.hoa,
@@ -204,25 +233,38 @@ function fromRentcastListing(x, geo) {
   });
 }
 
-async function rentcastListings(lat, lng, radiusMiles, geo, timeoutMs = 7000) {
-  lat = Number(lat); lng = Number(lng);
-  const radius = clamp(Number(radiusMiles) || 0.5, 0.1, 3);
+// Listings are asked for around a point snapped to a 0.01° grid (~1.1 km) with ONE fixed radius, so every
+// map view whose center falls in the same cell shares one paid call. 1.5 mi covers the cell plus the
+// app's ~2 km query box around any center inside it.
+const RC_GRID = 0.01;
+const RC_LIST_RADIUS_MI = 1.5;
+const snapGrid = (v) => +(Math.round(Number(v) / RC_GRID) * RC_GRID).toFixed(2);
+
+/** @param radiusMiles ignored (kept for the old signature); @param {object} [opts] { gate } per-client check on a miss */
+async function rentcastListings(lat, lng, radiusMiles, geo, timeoutMs = 7000, opts = {}) {
+  lat = snapGrid(lat); lng = snapGrid(lng);
   if (!validLatLng(lat, lng)) return null;
-  // Round the point so nearby map views share one paid call (and one cache entry)
-  const j = await rc('/listings/sale', { latitude: lat.toFixed(3), longitude: lng.toFixed(3), radius: radius.toFixed(1), status: 'Active', limit: 40 }, timeoutMs);
+  const j = await rc('/listings/sale', { latitude: lat.toFixed(2), longitude: lng.toFixed(2), radius: RC_LIST_RADIUS_MI.toFixed(1), status: 'Active', limit: 40 }, timeoutMs, opts.gate);
   if (!Array.isArray(j) || !j.length) return null;
   const g = await geo;                          // may be a promise so the tract lookup runs in parallel
   return j.slice(0, 200).map(x => fromRentcastListing(x, g)).filter(Boolean).slice(0, 40);
 }
 
-/** RentCast AVM for one address → { property, valueLow, valueHigh, rentLow, rentHigh, comps } or null */
-async function rentcastValue(address, fallback, timeoutMs = 7000) {
-  if (!rcKey()) return null;
+/**
+ * RentCast AVM for one address → { property, valueLow, valueHigh, rentLow, rentHigh, comps } or null.
+ * ONE paid call per address (value AVM). The rent comes from the free Census estimate unless
+ * opts.withRent is set (a second paid call, /avm/rent/long-term).
+ * @param {object} [opts] { gate, withRent }
+ */
+async function rentcastValue(address, fallback, timeoutMs = 7000, opts = {}) {
+  if (!hasRentcast()) return null;
   address = cleanText(address, 200);
   if (address.length < 5) return null;
   fallback = fallback || {};
-  // In parallel to stay inside the function time limit (both answers are cached for a day).
-  const [v, r] = await Promise.all([rc('/avm/value', { address, compCount: 5 }, timeoutMs), rc('/avm/rent/long-term', { address, compCount: 5 }, timeoutMs)]);
+  const [v, r] = await Promise.all([
+    rc('/avm/value', { address, compCount: 5 }, timeoutMs, opts.gate),
+    opts.withRent ? rc('/avm/rent/long-term', { address, compCount: 5 }, timeoutMs, opts.gate) : null,
+  ]);
   const vPrice = v && typeof v === 'object' ? numIn(v.price, 1000, 1e9) : 0;
   if (!vPrice) return null;
   const sp = v.subjectProperty && typeof v.subjectProperty === 'object' ? v.subjectProperty : {};
@@ -248,4 +290,5 @@ async function rentcastValue(address, fallback, timeoutMs = 7000) {
     comps: Array.isArray(v.comparables) ? v.comparables.length : 0 };
 }
 
-module.exports = { estimateHome, acsFor, stateAb, hash, rngFrom, dayNum, rentcastListings, rentcastValue, fromRentcastListing, hasRentcast: () => !!rcKey(), DATA_META: DATA.meta, USER_AGENT };
+module.exports = { estimateHome, acsFor, stateAb, hash, rngFrom, dayNum, rentcastListings, rentcastValue, fromRentcastListing, hasRentcast,
+  rcMaxPerHour, snapGrid, RC_CACHE_TTL_MS, RC_LIST_RADIUS_MI, DATA_META: DATA.meta, USER_AGENT };

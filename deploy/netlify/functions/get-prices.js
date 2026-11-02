@@ -12,8 +12,17 @@
  *    and numeric sanity checks (finite, positive, bounded).
  *  - One in-flight refresh per warm instance (concurrent requests share it) + 60 s in-memory cache
  *    + CDN caching (s-maxage) so traffic spikes can't be amplified into upstream request floods.
+ *  - Quotes are kept PER SYMBOL: a refresh where only some symbols succeed updates those and keeps the
+ *    others' last good quote (for up to 30 min), so a partial Yahoo answer never drops prices.
+ *  - A quote is rejected (the last good one is kept) when it moves more than 50 % from the last good
+ *    quote of the last 30 min, or is more than 20x away from a rough reference price.
+ *  - The CDN may cache an answer only when EVERY symbol was refreshed just now; a partial / stale
+ *    answer is "private, max-age=15" (browser only).
+ *  - lib/firewall.js in front (GET/HEAD, Origin allow-list, light per-IP limit 30/min per instance,
+ *    attack filter); CDN hits never reach the function, so the limit only meets cache misses.
  *  - On upstream failure, recent stale data is served; upstream errors are never echoed to the client.
  */
+const { withFirewall } = require('./lib/firewall');
 
 const SYMBOLS = [
   'AAPL','MSFT','GOOGL','AMZN','TSLA','META','NVDA',
@@ -28,27 +37,43 @@ const UPSTREAM_HOST = 'https://query1.finance.yahoo.com';
 const PER_REQUEST_TIMEOUT_MS = 4000;
 const MAX_UPSTREAM_BYTES = 256 * 1024;     // a 1d chart response is a few KB
 const MAX_PRICE = 1e7;                     // sanity bound for a share price (USD)
+const MAX_JUMP = 0.5;                      // reject a quote > 50 % away from the last good one
+const REF_BAND = 20;                       // …or > 20x away from the rough reference below
+// Rough reference prices (mid-2025, same as the app's built-in table). Only used as a wide 20x sanity
+// band (it allows splits and big moves); update if a symbol ever legitimately leaves it.
+const REF = { AAPL: 293.64, MSFT: 412.67, GOOGL: 183.41, AMZN: 227.88, TSLA: 290.12, META: 685.3, NVDA: 216.09,
+  JNJ: 162.45, PG: 178.2, KO: 66.8, WMT: 97.35, XOM: 112.7, BAC: 46.18, SPY: 595.42, VOO: 546.88, BND: 73.15, TLT: 88.42 };
 
 const CACHE_TTL = 60 * 1000;               // fresh for 60 s
-const STALE_TTL = 30 * 60 * 1000;          // serve stale up to 30 min if Yahoo is down
+const STALE_TTL = 30 * 60 * 1000;
+const RETRY_MS = 20 * 1000;            // after a partial / failed refresh, try again sooner than CACHE_TTL          // serve stale up to 30 min if Yahoo is down
 
-let _cache = null;
-let _cacheAt = 0;
+const _quotes = Object.create(null);   // sym → { price, at } (last GOOD quote)
+let _refreshedAt = 0;
+let _nextRefresh = 0;
+let _complete = false;                 // did the last refresh get a fresh, accepted quote for every symbol?
 let _inflight = null;
 
 const BASE_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'X-Content-Type-Options': 'nosniff',
 };
-// Browser may reuse for 30 s; Netlify's CDN caches for 60 s and may serve stale while it refreshes.
+// Complete answer: browser may reuse for 30 s; Netlify's CDN caches for 60 s and may serve stale while it refreshes.
 const CACHE_HEADERS = {
   'Cache-Control': 'public, max-age=30',
   'Netlify-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
 };
+// Partial / stale answer: never in the CDN, briefly in the browser.
+const PARTIAL_HEADERS = { 'Cache-Control': 'private, max-age=15' };
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-function reply(statusCode, obj, extra) {
-  return { statusCode, headers: { ...BASE_HEADERS, ...extra }, body: JSON.stringify(obj) };
+// lib/firewall.js always sets Cache-Control itself (no-store by default), so the policy this handler
+// wants for a 200 is remembered per event and put back by the outer wrapper below.
+const _wantCache = new WeakMap();
+function reply(event, statusCode, obj, extra) {
+  const headers = { ...BASE_HEADERS, ...extra };
+  if (headers['Cache-Control']) _wantCache.set(event, headers['Cache-Control']);
+  return { statusCode, headers, body: JSON.stringify(obj) };
 }
 
 // Fetch JSON with a hard timeout, a status check and a body size cap. Returns null on any failure.
@@ -98,34 +123,65 @@ async function fetchPrice(symbol) {
   return Math.round(price * 100) / 100;
 }
 
-async function refresh() {
-  const results = {};
-  await Promise.allSettled(SAFE_SYMBOLS.map(async (sym) => {
-    const price = await fetchPrice(sym);
-    if (price !== null) results[sym] = price;
-  }));
-  if (Object.keys(results).length > 0) {
-    _cache = results;
-    _cacheAt = Date.now();
-  }
-  return results;
+/** Last good quote for `sym` if it is younger than STALE_TTL, else 0. */
+function recent(sym, now = Date.now()) {
+  const e = _quotes[sym];
+  return e && now - e.at < STALE_TTL ? e.price : 0;
 }
 
-exports.handler = async (event) => {
-  const method = ((event && event.httpMethod) || 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    return reply(405, { error: 'Method not allowed' }, { ...NO_STORE, Allow: 'GET, HEAD' });
-  }
+/** Sanity checks on a new quote: reference band, then max move vs the last good quote. */
+function plausible(sym, price, prev) {
+  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0 || price > MAX_PRICE) return false;
+  const ref = REF[sym];
+  if (ref && (price > ref * REF_BAND || price < ref / REF_BAND)) return false;
+  if (prev && Math.abs(price / prev - 1) > MAX_JUMP) return false;
+  return true;
+}
 
+/** Every symbol with a good quote younger than STALE_TTL. */
+function snapshot() {
   const now = Date.now();
-  if (_cache && now - _cacheAt < CACHE_TTL) return reply(200, _cache, CACHE_HEADERS);
+  const out = {};
+  for (const sym of SAFE_SYMBOLS) { const p = recent(sym, now); if (p) out[sym] = p; }
+  return out;
+}
 
+async function refresh() {
+  let fresh = 0;
+  await Promise.allSettled(SAFE_SYMBOLS.map(async (sym) => {
+    const price = await fetchPrice(sym);
+    if (price !== null && plausible(sym, price, recent(sym))) { _quotes[sym] = { price, at: Date.now() }; fresh++; }
+  }));
+  _complete = fresh === SAFE_SYMBOLS.length;
+  _refreshedAt = Date.now();
+  _nextRefresh = _refreshedAt + (_complete ? CACHE_TTL : RETRY_MS);
+}
+
+function answer(event) {
+  const data = snapshot();
+  if (!Object.keys(data).length) return reply(event, 503, {}, NO_STORE);   // frontend keeps its built-in prices
+  return reply(event, 200, data, _complete ? CACHE_HEADERS : PARTIAL_HEADERS);
+}
+
+async function handle(event) {
+  if (Date.now() < _nextRefresh) return answer(event);
   // Coalesce concurrent refreshes so a burst of requests triggers one upstream fan-out, not N.
-  if (!_inflight) _inflight = refresh().finally(() => { _inflight = null; });
-  const results = await _inflight;
+  if (!_inflight) _inflight = refresh().catch(() => {}).finally(() => { _inflight = null; });
+  await _inflight;
+  return answer(event);
+}
 
-  if (Object.keys(results).length > 0) return reply(200, results, CACHE_HEADERS);
-  if (_cache && Date.now() - _cacheAt < STALE_TTL) return reply(200, _cache, { 'Cache-Control': 'public, max-age=15' });
-  // Nothing usable: non-200 (frontend checks res.ok and keeps its built-in prices); don't let the CDN cache it.
-  return reply(503, {}, NO_STORE);
+const firewalled = withFirewall(handle, {
+  name: 'get-prices',
+  methods: ['GET', 'HEAD'],
+  rateLimit: { windowMs: 60 * 1000, max: 30 },
+  json: false,
+});
+
+exports.handler = async (event, context) => {
+  event = event && typeof event === 'object' ? event : {};
+  const res = await firewalled(event, context);
+  const cc = _wantCache.get(event);
+  if (res && res.statusCode === 200 && cc && res.headers) res.headers['Cache-Control'] = cc;
+  return res;
 };

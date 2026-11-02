@@ -8,11 +8,19 @@
  *     Policy: real User-Agent, max 1 req/sec, cache results, no per-keystroke autocomplete.
  *
  * Every exported async function NEVER throws — failures return null / [].
- * Caches are in-memory per warm Lambda instance.
+ * Caches are in-memory per warm Lambda instance and hold typed addresses, so every entry is
+ * dropped after its TTL (20 min here): expired entries are swept on the next cache use, not kept
+ * until the cache fills. Nothing here logs a query or an address.
  *
- * Also holds small request helpers shared by the re-* functions (CORS origin check, client IP,
- * per-instance rate limiter, text sanitizer) so those functions stay standalone.
+ * Nominatim's 1 request/second policy is enforced SITE-WIDE through lib/ratelimit.js
+ * budget('nominatim', 1 per 1 s window) — shared by every instance — plus a per-instance 1.1 s
+ * spacing. When the slot can't be had quickly, nominatimSearch() returns null ("busy") and
+ * re-geocode answers 503, so the app falls back to its bundled city list.
+ *
+ * Also holds small request helpers shared by the re-* functions (client IP key, text sanitizer,
+ * query normaliser). Rate limiting itself is lib/ratelimit.js (durable, cross-instance).
  */
+const RL = require('./ratelimit');
 
 const USER_AGENT = 'MoneyQuest-InvestEdPro/1.0 (https://nextgenwealthproject.netlify.app)';
 const CENSUS_BASE = 'https://geocoding.geo.census.gov/geocoder/geographies';
@@ -23,22 +31,37 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;   // upstream JSON bigger than this is r
 const CACHE_TTL = 20 * 60 * 1000; // 20 min
 const CACHE_MAX = 500;
 const NOMINATIM_MAX_WAIT = 2500;          // don't queue a request behind more than ~2 others
+const SWEEP_EVERY_MS = 30 * 1000;
 
 // ── tiny TTL cache (Map-backed, so any string key is safe) ───────────────────
+// An entry lives at most `ttl` ms from when it was stored (reads don't extend it). Expired entries
+// are swept (at most every 30 s) on the next get/set, so stale addresses don't linger in memory.
 function makeCache(ttl = CACHE_TTL, max = CACHE_MAX) {
   const m = new Map();
+  let nextSweep = 0;
+  function sweep(now) {
+    if (now < nextSweep) return;
+    nextSweep = now + SWEEP_EVERY_MS;
+    for (const [k, e] of m) if (now - e.at > ttl) m.delete(k);
+  }
   return {
     get(k) {
+      const now = Date.now();
+      sweep(now);
       const hit = m.get(k);
       if (!hit) return undefined;
-      if (Date.now() - hit.at > ttl) { m.delete(k); return undefined; }
+      if (now - hit.at > ttl) { m.delete(k); return undefined; }
       return hit.v;
     },
     set(k, v) {
+      const now = Date.now();
+      sweep(now);
       if (m.has(k)) m.delete(k);
       else if (m.size >= max) m.delete(m.keys().next().value); // drop oldest
-      m.set(k, { v, at: Date.now() });
+      m.set(k, { v, at: now });
     },
+    get size() { return m.size; },
+    ttl,
   };
 }
 
@@ -73,24 +96,57 @@ async function fetchJson(url, { timeoutMs = DEFAULT_TIMEOUT, headers = {}, metho
   }
 }
 
-// Nominatim: serialize calls ≥1.1s apart within this instance (usage policy). If the queue is already
-// long, give up instead of holding the function open (and piling up waits) — caller returns [].
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Nominatim (usage policy: max 1 request/second for the whole site, which shares one User-Agent).
+//  1. per instance: calls ≥1.1 s apart; if the local queue is already long, give up (no pile-up).
+//  2. site-wide: one slot per 1-second window in the shared counter (RL.budget). If the slot is
+//     taken, wait for the next second (up to twice, within the caller's deadline); still taken → busy.
+//     With a database configured this fails CLOSED (DB error → busy → the app's bundled city list),
+//     because per-instance spacing alone can't keep the whole site at 1/s. With no database configured
+//     at all (local dev: no SUPA_SERVICE_KEY or RATE_LIMIT_DB=off) the per-instance counter is used.
 let _nomNext = 0;
-async function nominatimThrottle() {
+const dbConfigured = () => !!process.env.SUPA_SERVICE_KEY && process.env.RATE_LIMIT_DB !== 'off';
+async function nominatimThrottle(deadline) {
   const now = Date.now();
   const wait = Math.max(0, _nomNext - now);
   if (wait > NOMINATIM_MAX_WAIT) return false;
   _nomNext = Math.max(now, _nomNext) + 1100;
-  if (wait) await new Promise(r => setTimeout(r, wait));
-  return true;
+  if (wait) await sleep(wait);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await RL.budget('nominatim', { windowSec: 1, max: 1, failClosed: dbConfigured() });
+    if (r && r.ok) return true;
+    if (!r || !r.count) return false;                       // count 0 = limiter unavailable (failed closed): don't wait
+    const next = 1000 - (Date.now() % 1000) + 25;           // start of the next 1-second window
+    if (attempt === 2 || Date.now() + next > deadline) return false;
+    await sleep(next);
+  }
+  return false;
 }
 
 // ── request helpers (shared by re-value / re-geocode / re-listings) ──────────
 // Strip control chars, angle brackets and backticks; collapse whitespace; cap length.
+// Only strings and numbers are accepted (objects/arrays → ''), so a JSON value like {"toString":1}
+// can never throw. The input is cut to a bounded length BEFORE the regexes run (bounded CPU).
 function cleanText(s, max = 120) {
   if (s == null) return '';
   if (typeof s !== 'string' && typeof s !== 'number') return '';
-  return String(s).replace(/[\u0000-\u001f\u007f-\u009f<>`\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+  const lim = Math.max(0, Math.min(Number(max) || 0, 100000));
+  return String(s).slice(0, lim * 4 + 16).replace(/[\u0000-\u001f\u007f-\u009f<>`\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, lim);
+}
+
+// Primitive → string, anything else → '' (never calls an attacker-controlled toString).
+const str = (v) => (typeof v === 'string' ? v : typeof v === 'number' && isFinite(v) ? String(v) : '');
+// Primitive → number, anything else → NaN (Number({toString:1}) would throw).
+const toNum = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+
+/**
+ * Cache key for a free-text place / address query: lower-case, every run of punctuation or
+ * whitespace → one space. "400 Grand Blvd., Kansas City,  MO" and "400 grand blvd kansas city mo"
+ * share one entry (and one upstream call).
+ */
+function normQuery(s) {
+  return str(s).slice(0, 400).toLowerCase().replace(/[^\p{L}\p{M}0-9]+/gu, ' ').trim();
 }
 
 function header(event, name) {
@@ -99,9 +155,9 @@ function header(event, name) {
   return typeof v === 'string' ? v : '';
 }
 
+// Rate-limit key for the caller: lib/ratelimit.js ipKey (Netlify's client-IP header first; IPv6 → /64).
 function clientIp(event) {
-  return (header(event, 'x-nf-client-connection-ip') || header(event, 'client-ip') ||
-    header(event, 'x-forwarded-for').split(',')[0] || 'unknown').trim().slice(0, 64);
+  return RL.ipKey((event && event.headers) || {});
 }
 
 // Only echo CORS for our own site / deploy previews / local dev. Same-origin calls don't need it.
@@ -122,20 +178,19 @@ function corsHeaders(event, methods) {
   return h;
 }
 
-// Fixed-window per-key limiter (per warm instance — a speed bump, not a guarantee).
-function makeRateLimiter(max, windowMs, maxKeys = 5000) {
-  const m = new Map();
-  return function hit(key) {
-    const now = Date.now();
-    let e = m.get(key);
-    if (!e || now - e.start >= windowMs) {
-      if (!e && m.size >= maxKeys) m.delete(m.keys().next().value);
-      e = { start: now, n: 0 };
-      m.delete(key);
-      m.set(key, e);
-    }
-    e.n++;
-    return e.n <= max;
+/**
+ * Durable per-client limiter (lib/ratelimit.js hit(), shared across instances, IPv6 keyed by /64).
+ * Replaces the old per-instance makeRateLimiter. Returns async (key) → boolean.
+ * @param {string} bucket  stable name, e.g. 'rc-value'
+ * @param {number} max     events allowed per window
+ * @param {number} windowSec
+ * @param {{failClosed?:boolean}} [opts]  failClosed for anything that costs money
+ */
+function makeRateLimiter(bucket, max, windowSec, opts = {}) {
+  if (typeof bucket !== 'string') throw new TypeError('makeRateLimiter(bucket, max, windowSec): the per-instance form was removed');
+  return async (key) => {
+    const r = await RL.hit(bucket, String(key || 'unknown'), { windowSec, max, failClosed: !!opts.failClosed });
+    return !!(r && r.ok);
   };
 }
 
@@ -152,7 +207,7 @@ function titleCase(s) {
   }).join('');
 }
 
-function normKey(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+const normKey = normQuery;
 
 function isNum(n) { return typeof n === 'number' && isFinite(n); }
 function validLatLng(lat, lng) { return isNum(lat) && isNum(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180; }
@@ -162,7 +217,7 @@ function tractFrom(geographies) {
   const list = geographies && geographies['Census Tracts'];
   const t = Array.isArray(list) && list[0];
   if (!t) return null;
-  const state = String(t.STATE || ''), county = String(t.COUNTY || ''), tract = String(t.TRACT || '');
+  const state = str(t.STATE), county = str(t.COUNTY), tract = str(t.TRACT);
   if (!/^\d{2}$/.test(state) || !/^\d{3}$/.test(county) || !/^\d{6}$/.test(tract)) return null;
   return { state, county, tract };
 }
@@ -185,8 +240,8 @@ async function censusGeocode(oneLineAddress, timeoutMs = DEFAULT_TIMEOUT) {
   if (!m || !m.coordinates) { _addrCache.set(key, null); return null; }
 
   // NOTE: coordinates.x = LONGITUDE, coordinates.y = LATITUDE
-  const lng = Number(m.coordinates.x);
-  const lat = Number(m.coordinates.y);
+  const lng = toNum(m.coordinates.x);
+  const lat = toNum(m.coordinates.y);
   if (!validLatLng(lat, lng)) { _addrCache.set(key, null); return null; }
 
   const ac = m.addressComponents || {};
@@ -215,7 +270,7 @@ async function censusGeocode(oneLineAddress, timeoutMs = DEFAULT_TIMEOUT) {
 // ── Census: lat/lng → tract FIPS ─────────────────────────────────────────────
 /** @returns {Promise<{state,county,tract}|null>} */
 async function censusTractForPoint(lat, lng, timeoutMs = DEFAULT_TIMEOUT) {
-  lat = Number(lat); lng = Number(lng);
+  lat = toNum(lat); lng = toNum(lng);
   if (!validLatLng(lat, lng)) return null;
   const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
   const cached = _tractCache.get(key);
@@ -231,8 +286,8 @@ async function censusTractForPoint(lat, lng, timeoutMs = DEFAULT_TIMEOUT) {
 
 // ── Nominatim place search ───────────────────────────────────────────────────
 function zoomForPlace(r) {
-  const t = String(r.addresstype || r.type || '').toLowerCase();
-  const cls = String(r.category || r.class || '').toLowerCase();
+  const t = str(r.addresstype || r.type).toLowerCase();
+  const cls = str(r.category || r.class).toLowerCase();
   if (t === 'state') return 6;
   if (t === 'county') return 9;
   if (t === 'postcode' || cls === 'postcode') return 13;
@@ -243,22 +298,26 @@ function zoomForPlace(r) {
 
 function placeLabel(r) {
   const a = (r.address && typeof r.address === 'object') ? r.address : {};
-  const city = a.city || a.town || a.village || a.hamlet || a.municipality || '';
-  const state = a.state || '';
-  const t = String(r.addresstype || r.type || '').toLowerCase();
-  if (t === 'postcode' && a.postcode) return [a.postcode, city, state].filter(Boolean).join(', ');
-  if (t === 'state') return state || r.name || r.display_name;
-  const name = r.name || city;
+  const city = str(a.city) || str(a.town) || str(a.village) || str(a.hamlet) || str(a.municipality);
+  const state = str(a.state);
+  const t = str(r.addresstype || r.type).toLowerCase();
+  const postcode = str(a.postcode);
+  if (t === 'postcode' && postcode) return [postcode, city, state].filter(Boolean).join(', ');
+  if (t === 'state') return state || str(r.name) || str(r.display_name);
+  const name = str(r.name) || city;
   const bits = [name];
   if (city && city !== name) bits.push(city);
   if (state && state !== name) bits.push(state);
-  return bits.filter(Boolean).join(', ') || r.display_name || '';
+  return bits.filter(Boolean).join(', ') || str(r.display_name);
 }
 
 /**
- * @returns {Promise<Array<{label,kind:'place',lat,lng,zoom,type,city?,state?,zip?,bbox?}>>}
+ * @returns {Promise<Array<{label,kind:'place',lat,lng,zoom,type,city?,state?,zip?,bbox?}>|null>}
+ *   [] = Nominatim answered with no match (cached); null = busy (site-wide 1 req/s slot taken) or
+ *   upstream failure (not cached) — callers should answer "try again" (503), not "not found".
  */
 async function nominatimSearch(q, timeoutMs = DEFAULT_TIMEOUT) {
+  const t0 = Date.now();
   q = cleanText(q, 200);
   if (q.length < 2) return [];
   const key = normKey(q);
@@ -272,15 +331,17 @@ async function nominatimSearch(q, timeoutMs = DEFAULT_TIMEOUT) {
     : `q=${encodeURIComponent(q)}&countrycodes=us`;
   const url = `${NOMINATIM_BASE}?${params}&format=jsonv2&limit=5&addressdetails=1`;
 
-  if (!(await nominatimThrottle())) return []; // too busy — don't cache
-  const j = await fetchJson(url, { timeoutMs, headers: { 'Accept-Language': 'en-US' } });
-  if (!Array.isArray(j)) return []; // failure — don't cache
+  if (!(await nominatimThrottle(t0 + Math.max(0, timeoutMs - 1500)))) return null; // too busy — don't cache
+  const left = timeoutMs - (Date.now() - t0);
+  if (left < 800) return null;
+  const j = await fetchJson(url, { timeoutMs: left, headers: { 'Accept-Language': 'en-US' } });
+  if (!Array.isArray(j)) return null; // failure — don't cache
 
   const seen = new Set();
   const out = [];
   for (const r of j.slice(0, 10)) {
     if (!r || typeof r !== 'object') continue;
-    const lat = Number(r.lat), lng = Number(r.lon);
+    const lat = toNum(r.lat), lng = toNum(r.lon);
     if (!validLatLng(lat, lng)) continue;
     const a = (r.address && typeof r.address === 'object') ? r.address : {};
     const label = cleanText(placeLabel(r), 160);
@@ -292,19 +353,19 @@ async function nominatimSearch(q, timeoutMs = DEFAULT_TIMEOUT) {
       lat: +lat.toFixed(6),
       lng: +lng.toFixed(6),
       zoom: zoomForPlace(r),
-      type: cleanText(r.addresstype || r.type || '', 40),
+      type: cleanText(str(r.addresstype) || str(r.type), 40),
     };
-    const city = cleanText(a.city || a.town || a.village || a.hamlet || a.municipality, 60);
+    const city = cleanText(str(a.city) || str(a.town) || str(a.village) || str(a.hamlet) || str(a.municipality), 60);
     if (city) item.city = city;
     const stName = cleanText(a.state, 40);
     if (stName) item.state = stName; // full name e.g. "Missouri" (Nominatim), not "MO"
-    const iso = String(a['ISO3166-2-lvl4'] || '');
+    const iso = str(a['ISO3166-2-lvl4']);
     if (/^US-[A-Z]{2}$/.test(iso)) item.stateCode = iso.slice(3); // "MO"
-    const zip = String(a.postcode || '').replace(/\D/g, '').slice(0, 5);
+    const zip = str(a.postcode).replace(/\D/g, '').slice(0, 5);
     if (zip.length === 5) item.zip = zip;
     if (Array.isArray(r.boundingbox) && r.boundingbox.length === 4) {
       // Nominatim order: [south, north, west, east] (strings)
-      const [s, n, w, e] = r.boundingbox.map(Number);
+      const [s, n, w, e] = r.boundingbox.map(toNum);
       if (validLatLng(s, w) && validLatLng(n, e) && n >= s && e >= w) item.bbox = { south: s, west: w, north: n, east: e };
     }
     out.push(item);
@@ -323,6 +384,8 @@ module.exports = {
   makeRateLimiter,
   titleCase,
   cleanText,
+  normQuery,
+  str,
   clientIp,
   corsHeaders,
   validLatLng,

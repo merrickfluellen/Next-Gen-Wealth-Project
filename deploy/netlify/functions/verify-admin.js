@@ -8,7 +8,8 @@
  *
  * A token is valid only if: its HMAC-SHA256 verifies (constant-time), it has not
  * expired, it is an admin-session token (purpose-bound key), and its credential
- * fingerprint matches the CURRENT admin hashes (changing credentials revokes it).
+ * fingerprint matches the CURRENT admin hashes (changing credentials revokes it). Tokens from
+ * admin-auth live 2 hours.
  * The check itself is lib/session.js isAdminToken() — the single source of truth, also used by
  * admin-users.js.
  */

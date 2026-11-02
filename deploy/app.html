@@ -3035,7 +3035,7 @@ const clearLocalUserData = () => {
     for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
     keys.forEach(key => { if (key && key.indexOf('::') > 0) localStorage.removeItem(key); });
   } catch {}
-  [TOKEN_KEY, 'investedSession', 'adminAnalytics', ...LEGACY_PII_KEYS].forEach(lsDel);
+  [TOKEN_KEY, 'investedSession', 'adminAnalytics', 'mqActiveTab', ...LEGACY_PII_KEYS].forEach(lsDel);
 };
 // Remove per-user data of every account except `email` (older versions never cleaned up on shared devices)
 const clearOtherUsersData = (email) => {
@@ -3067,7 +3067,7 @@ const TabGuard = (() => {
   const tokenSub = () => { const t = getToken(); const c = t ? tokenClaims(t) : null; return c && typeof c.sub === 'string' ? c.sub : ''; };
   const api = {
     id,
-    claim(em) { if (frozen || !em) return; email = em; try { localStorage.setItem(KEY, JSON.stringify({ tab: id, email: em, at: Date.now() })); } catch {} },
+    claim(em) { if (frozen || !em) return; email = em; try { localStorage.setItem(KEY, JSON.stringify({ tab: id, at: Date.now() })); } catch {} },
     release() { email = ''; },
     isFrozen: () => !!frozen,
     // True while this tab may write for `em`: it holds the claim and the stored token is still that account's.

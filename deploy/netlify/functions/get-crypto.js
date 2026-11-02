@@ -9,8 +9,18 @@
  *    numeric sanity checks (finite, non-negative, bounded); malformed entries are skipped, not fatal.
  *  - One in-flight refresh per warm instance + 60 s in-memory cache + CDN caching (s-maxage) to cut
  *    CoinGecko usage (free tier is rate-limited) and prevent DoS amplification.
+ *  - Quotes are kept PER COIN: a reply missing some coins updates the others and keeps each missing
+ *    coin's last good quote (for up to 30 min).
+ *  - A price is rejected (the last good one is kept) when it moves more than 50 % from the last good
+ *    quote of the last 30 min, is more than 20x away from a rough reference price, or — for the
+ *    stablecoins USDT/USDC/DAI — is outside 0.90–1.10. Prices are rounded to 8 significant digits.
+ *  - The CDN may cache an answer only when EVERY coin was refreshed just now; a partial / stale
+ *    answer is "private, max-age=15" (browser only).
+ *  - lib/firewall.js in front (GET/HEAD, Origin allow-list, light per-IP limit 30/min per instance,
+ *    attack filter); CDN hits never reach the function, so the limit only meets cache misses.
  *  - On upstream failure, recent stale data is served; upstream errors are never echoed to the client.
  */
+const { withFirewall } = require('./lib/firewall');
 
 const COIN_IDS = [
   'bitcoin','ethereum','tether','binancecoin','solana','ripple','usd-coin',
@@ -44,12 +54,23 @@ const MAX_UPSTREAM_BYTES = 256 * 1024;   // the real response is ~5 KB
 const MAX_PRICE = 1e9;
 const MAX_MCAP = 1e15;
 const MAX_CHANGE_PCT = 1e5;
+const MAX_JUMP = 0.5;                    // reject a price > 50 % away from the last good one
+const REF_BAND = 20;                     // …or > 20x away from the rough reference below
+const STABLE = new Set(['USDT', 'USDC', 'DAI']);
+const STABLE_LO = 0.9, STABLE_HI = 1.1;
+// Rough reference prices (mid-2025, the app's built-in defaults). Only a wide 20x sanity band.
+const REF = { BTC: 105000, ETH: 3800, BNB: 710, SOL: 185, XRP: 2.45, ADA: 0.72, AVAX: 38, DOGE: 0.21, TRX: 0.26,
+  LINK: 18, DOT: 7.5, MATIC: 0.52, TON: 5.8, SHIB: 0.0000265, LTC: 95, BCH: 430, UNI: 9.2, ATOM: 7.1, XLM: 0.38,
+  NEAR: 5.8, XMR: 185, ETC: 27, ALGO: 0.22, HBAR: 0.095, FIL: 5.1, AAVE: 225, VET: 0.038 };
 
 const CACHE_TTL = 60 * 1000;
 const STALE_TTL = 30 * 60 * 1000;
+const RETRY_MS = 20 * 1000;            // after a partial / failed refresh, try again sooner than CACHE_TTL
 
-let _cache = null;
-let _cacheAt = 0;
+const _quotes = Object.create(null);   // sym → { q:{price,change24h,marketCap}, at } (last GOOD quote)
+let _refreshedAt = 0;
+let _nextRefresh = 0;
+let _complete = false;
 let _inflight = null;
 
 const BASE_HEADERS = {
@@ -60,10 +81,16 @@ const CACHE_HEADERS = {
   'Cache-Control': 'public, max-age=30',
   'Netlify-CDN-Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120',
 };
+const PARTIAL_HEADERS = { 'Cache-Control': 'private, max-age=15' };
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-function reply(statusCode, obj, extra) {
-  return { statusCode, headers: { ...BASE_HEADERS, ...extra }, body: JSON.stringify(obj) };
+// lib/firewall.js always sets Cache-Control itself (no-store by default), so the policy this handler
+// wants for a 200 is remembered per event and put back by the outer wrapper below.
+const _wantCache = new WeakMap();
+function reply(event, statusCode, obj, extra) {
+  const headers = { ...BASE_HEADERS, ...extra };
+  if (headers['Cache-Control']) _wantCache.set(event, headers['Cache-Control']);
+  return { statusCode, headers, body: JSON.stringify(obj) };
 }
 
 // Fetch JSON with a hard timeout, a status check and a body size cap. Returns null on any failure.
@@ -101,7 +128,25 @@ async function fetchJson(url, { timeoutMs, maxBytes, headers }) {
 }
 
 const finiteIn = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+const round8 = (v) => Number(v.toPrecision(8));
 
+/** Last good quote for `sym` if it is younger than STALE_TTL, else null. */
+function recent(sym, now = Date.now()) {
+  const e = _quotes[sym];
+  return e && now - e.at < STALE_TTL ? e.q : null;
+}
+
+/** Sanity checks on a new price: stablecoin band / reference band, then max move vs the last good quote. */
+function plausible(sym, price, prev) {
+  if (!finiteIn(price, 0, MAX_PRICE) || price <= 0) return false;
+  if (STABLE.has(sym)) return price >= STABLE_LO && price <= STABLE_HI;
+  const ref = REF[sym];
+  if (ref && (price > ref * REF_BAND || price < ref / REF_BAND)) return false;
+  if (prev && Math.abs(price / prev - 1) > MAX_JUMP) return false;
+  return true;
+}
+
+/** Upstream JSON → { SYM: {price, change24h, marketCap} } for well-formed entries (no plausibility check yet). */
 function parseCoins(json) {
   const result = {};
   if (!json || typeof json !== 'object' || Array.isArray(json)) return result;
@@ -112,12 +157,19 @@ function parseCoins(json) {
     const ch = data.usd_24h_change;
     const mc = data.usd_market_cap;
     result[ID_TO_SYM[id]] = {
-      price: data.usd,
+      price: round8(data.usd),
       change24h: finiteIn(ch, -100, MAX_CHANGE_PCT) ? Math.round(ch * 100) / 100 : 0,
-      marketCap: finiteIn(mc, 0, MAX_MCAP) ? mc : 0,
+      marketCap: finiteIn(mc, 0, MAX_MCAP) ? Math.round(mc) : 0,
     };
   }
   return result;
+}
+
+function snapshot() {
+  const now = Date.now();
+  const out = {};
+  for (const id of SAFE_IDS) { const sym = ID_TO_SYM[id]; const q = recent(sym, now); if (q) out[sym] = q; }
+  return out;
 }
 
 async function refresh() {
@@ -126,26 +178,42 @@ async function refresh() {
     maxBytes: MAX_UPSTREAM_BYTES,
     headers: { 'User-Agent': 'InvestEd-Pro/1.0', 'Accept': 'application/json' },
   });
-  const result = parseCoins(json);
-  if (Object.keys(result).length > 0) {
-    _cache = result;
-    _cacheAt = Date.now();
+  const parsed = parseCoins(json);
+  let fresh = 0;
+  const now = Date.now();
+  for (const [sym, q] of Object.entries(parsed)) {
+    const prev = recent(sym, now);
+    if (plausible(sym, q.price, prev && prev.price)) { _quotes[sym] = { q, at: now }; fresh++; }
   }
-  return result;
+  _complete = fresh === SAFE_IDS.length;
+  _refreshedAt = Date.now();
+  _nextRefresh = _refreshedAt + (_complete ? CACHE_TTL : RETRY_MS);
 }
 
-exports.handler = async (event) => {
-  const method = ((event && event.httpMethod) || 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    return reply(405, { error: 'Method not allowed' }, { ...NO_STORE, Allow: 'GET, HEAD' });
-  }
+function answer(event) {
+  const data = snapshot();
+  if (!Object.keys(data).length) return reply(event, 503, {}, NO_STORE);
+  return reply(event, 200, data, _complete ? CACHE_HEADERS : PARTIAL_HEADERS);
+}
 
-  if (_cache && Date.now() - _cacheAt < CACHE_TTL) return reply(200, _cache, CACHE_HEADERS);
+async function handle(event) {
+  if (Date.now() < _nextRefresh) return answer(event);
+  if (!_inflight) _inflight = refresh().catch(() => {}).finally(() => { _inflight = null; });
+  await _inflight;
+  return answer(event);
+}
 
-  if (!_inflight) _inflight = refresh().finally(() => { _inflight = null; });
-  const result = await _inflight;
+const firewalled = withFirewall(handle, {
+  name: 'get-crypto',
+  methods: ['GET', 'HEAD'],
+  rateLimit: { windowMs: 60 * 1000, max: 30 },
+  json: false,
+});
 
-  if (Object.keys(result).length > 0) return reply(200, result, CACHE_HEADERS);
-  if (_cache && Date.now() - _cacheAt < STALE_TTL) return reply(200, _cache, { 'Cache-Control': 'public, max-age=15' });
-  return reply(503, {}, NO_STORE);
+exports.handler = async (event, context) => {
+  event = event && typeof event === 'object' ? event : {};
+  const res = await firewalled(event, context);
+  const cc = _wantCache.get(event);
+  if (res && res.statusCode === 200 && cc && res.headers) res.headers['Cache-Control'] = cc;
+  return res;
 };

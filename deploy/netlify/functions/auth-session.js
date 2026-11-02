@@ -9,6 +9,10 @@
  *                                                       user, or password changed since sign-in
  *   503 { error }                                       database unavailable
  *
+ * A fresh token is only ever issued after lib/session.js authenticate() has re-read the user row and
+ * matched the token's `ver` against the CURRENT pw_hash, so a token from before a password change /
+ * reset, or of a deleted account, can never be refreshed. The new token carries the same binding.
+ *
  * Env: SESSION_SECRET, SUPA_SERVICE_KEY, SUPABASE_URL (optional).
  */
 'use strict';

@@ -8,43 +8,45 @@
  * OpenStreetMap addresses itself (Overpass allows CORS) and POSTs the raw elements here to be priced.
  * GET still tries Overpass from the server as a fallback.
  *
- * With RENTCAST_API_KEY: real active for-sale listings (forSale:true). Paid → only for US map areas,
- * cached per ~1 km cell for a day, capped per client and per instance.
+ * With RENTCAST_API_KEY: real active for-sale listings (forSale:true). Paid → only for US map areas; asked
+ * for around the map center snapped to a 0.01° (~1 km) grid with one fixed radius and cached for 1 hour,
+ * so nearby views share one call; each billable miss must pass a per-client cap (15/hour, durable, fails
+ * closed) and the site-wide hourly budget (lib/re-estimate.js).
  * Free: real street addresses from OpenStreetMap (Overpass API) with values estimated from
  * Census neighborhood data (see lib/re-estimate.js). These are practice listings — the homes
  * are not actually for sale. If an area has few mapped addresses, practice homes are added on
  * real residential streets (synthetic:true).
  *
  * Posted elements are untrusted: every field is type-checked, length-capped and must sit inside the box.
+ * Request order: firewall (method, Origin, durable per-client limit, 256 KB body cap) → nesting-depth
+ * pre-scan → JSON.parse. So a rate-limited or oversized request costs no parsing.
  */
 
-const { censusTractForPoint, makeCache, makeRateLimiter, clientIp, corsHeaders, cleanText, fetchJson } = require('./lib/geo');
-const { estimateHome, hash, rngFrom, dayNum, rentcastListings, hasRentcast } = require('./lib/re-estimate');
+const { withFirewall } = require('./lib/firewall');
+const RL = require('./lib/ratelimit');
+const { censusTractForPoint, makeCache, cleanText, fetchJson, str } = require('./lib/geo');
+const { estimateHome, hash, rngFrom, dayNum, rentcastListings, hasRentcast, snapGrid } = require('./lib/re-estimate');
 
 const MAX_BOX = 0.05;
 const MAX_LISTINGS = 40;
 const MIN_REAL = 12;
 const MAX_ELEMENTS = 600;
-const MAX_BODY = 3 * 1024 * 1024;
+const MAX_BODY = 256 * 1024;                    // the app posts ≤ 360 Overpass elements
+const MAX_DEPTH = 6;                            // { elements:[ { tags:{…} } ] } is 4 deep
 const DEADLINE_MS = 9000;                       // stay under Netlify's 10 s limit
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const OSM_ATTR = 'Addresses © OpenStreetMap contributors (ODbL). Values estimated from U.S. Census ACS 2024 + FHFA HPI.';
-const _cache = makeCache(30 * 60 * 1000, 300);
-const _ipLimit = makeRateLimiter(60, 5 * 60 * 1000);       // requests per client per 5 min
-const _ipOverpass = makeRateLimiter(10, 5 * 60 * 1000);    // server-side Overpass calls per client per 5 min
-const _ipPaidLimit = makeRateLimiter(15, 60 * 60 * 1000);  // RentCast cache misses per client per hour
+const _cache = makeCache(30 * 60 * 1000, 300);  // GET answers (no personal data: a map box + city/state hints)
+const OVERPASS_PER_CLIENT = { windowSec: 5 * 60, max: 10 };   // server-side Overpass calls per client
+const PAID_PER_CLIENT = { windowSec: 3600, max: 15, failClosed: true };  // RentCast cache misses per client
 
 // Buildings that are not homes
 const NOT_HOME = new Set(['commercial', 'retail', 'industrial', 'warehouse', 'office', 'school', 'church', 'chapel', 'cathedral', 'mosque', 'temple', 'synagogue',
   'hospital', 'university', 'college', 'kindergarten', 'public', 'civic', 'government', 'train_station', 'transportation', 'supermarket', 'hotel', 'garage', 'garages',
   'parking', 'shed', 'barn', 'service', 'hangar', 'stadium', 'sports_hall', 'fire_station', 'kiosk', 'roof', 'construction', 'manufacture', 'fast_food', 'bank']);
 
-function reply(event, obj, status = 200, cache = 'no-store') {
-  return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff', ...corsHeaders(event, 'GET, POST, OPTIONS') },
-    body: JSON.stringify(obj),
-  };
+function reply(obj, status = 200) {
+  return { statusCode: status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj) };
 }
 
 // Rough US footprint (50 states, DC, PR) — RentCast only covers the US
@@ -63,7 +65,7 @@ async function overpass(query, deadline) {
   return null;
 }
 
-const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+const num = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && v.length < 40 ? Number(v) : NaN);
 
 // Rough footprint area (sq ft) of an OSM way from its bounds
 function footprintSqft(b) {
@@ -76,74 +78,89 @@ function footprintSqft(b) {
   return isFinite(sq) && sq > 0 && sq < 1e7 ? sq : 0;
 }
 
+/** True when no array/object in the JSON text nests deeper than `max` (string-aware, linear). */
+function depthOk(s, max) {
+  let d = 0;
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (inStr) {
+      if (c === 92) i++;                     // backslash: skip the escaped char
+      else if (c === 34) inStr = false;
+      continue;
+    }
+    if (c === 34) inStr = true;
+    else if (c === 91 || c === 123) { if (++d > max) return false; }
+    else if (c === 93 || c === 125) d--;
+  }
+  return true;
+}
+
 function parseBody(event) {
-  let raw = event.body || '';
+  let raw = event.body == null ? '' : event.body;
   if (typeof raw !== 'string') return null;
-  if (raw.length > (event.isBase64Encoded ? MAX_BODY * 1.4 : MAX_BODY)) return null;
+  if (raw.length > (event.isBase64Encoded ? MAX_BODY * 1.4 : MAX_BODY)) return null;   // the firewall caps it too
   if (event.isBase64Encoded) raw = Buffer.from(raw, 'base64').toString('utf8');
+  if (raw.length > MAX_BODY) return null;
   if (!raw.trim()) return {};
+  if (!depthOk(raw, MAX_DEPTH)) return null;
   const b = JSON.parse(raw);
   return b && typeof b === 'object' && !Array.isArray(b) ? b : null;
 }
 
-exports.handler = async (event) => {
-  event = event || {};
+async function handle(event) {
   const t0 = Date.now();
   const method = event.httpMethod || 'GET';
-  if (method === 'OPTIONS') return { statusCode: 204, headers: corsHeaders(event, 'GET, POST, OPTIONS'), body: '' };
-  if (method !== 'GET' && method !== 'POST' && method !== 'HEAD') {
-    const r = reply(event, { listings: [], error: 'method not allowed' }, 405);
-    r.headers.Allow = 'GET, POST, OPTIONS';
-    return r;
-  }
   try {
     let q = event.queryStringParameters || {};
     let posted = null;
     if (method === 'POST') {
       let b = null;
       try { b = parseBody(event); } catch { b = null; }
-      if (!b) return reply(event, { listings: [], error: 'bad body' });
+      if (!b) return reply({ listings: [], error: 'bad body' });
       q = b;
       posted = Array.isArray(b.elements) ? b.elements.slice(0, MAX_ELEMENTS) : [];
     }
     const south = num(q.south), west = num(q.west), north = num(q.north), east = num(q.east);
     if (![south, west, north, east].every(isFinite) || north <= south || east <= west ||
         south < -90 || north > 90 || west < -180 || east > 180) {
-      return reply(event, { listings: [], error: 'bad bbox' });
+      return reply({ listings: [], error: 'bad bbox' });
     }
     if (north - south > MAX_BOX || east - west > MAX_BOX) {
-      return reply(event, { listings: [], tooBig: true });
+      return reply({ listings: [], tooBig: true });
     }
-    const r3 = (n) => n.toFixed(3);
-    const cacheKey = [r3(south), r3(west), r3(north), r3(east), dayNum()].join(',');
-    const hit = posted ? null : _cache.get(cacheKey);
-    if (hit) return reply(event, hit, 200, 'public, max-age=300');
-
-    const ip = clientIp(event);
-    if (!_ipLimit(ip)) return reply(event, { listings: [], error: 'rate_limited' }, 429);
-
-    const cLat = (south + north) / 2, cLng = (west + east) / 2;
     const hintCity = cleanText(q.city, 60), hintState = cleanText(q.state, 30);
+    const r3 = (n) => n.toFixed(3);
+    // The city/state hints end up in the listings, so they are part of the key: a GET with made-up
+    // hints can only ever be served back to a request with the same hints (no cache poisoning).
+    const cacheKey = [r3(south), r3(west), r3(north), r3(east), dayNum(), hintCity.toLowerCase(), hintState.toLowerCase()].join('|');
+    const hit = posted ? null : _cache.get(cacheKey);
+    if (hit) return reply(hit);
+
+    const ip = RL.ipKey(event.headers);
+    const cLat = (south + north) / 2, cLng = (west + east) / 2;
     const deadline = t0 + DEADLINE_MS;
 
     // Tract lookup and map data in parallel (keeps us well under Netlify's 10s limit)
     const geoP = censusTractForPoint(cLat, cLng, 5000);
 
     // Paid path: real for-sale listings (falls through to the free path if RentCast has none / fails).
-    // The lib caches by rounded center, so the per-client cap only bites on real (billable) misses.
-    if (hasRentcast() && inUS(cLat, cLng) && _ipPaidLimit(ip)) {
-      const radius = Math.max(0.3, Math.min(3, (north - south) * 69 / 2));
-      const listings = await rentcastListings(cLat, cLng, radius, geoP, Math.max(1000, Math.min(7000, deadline - Date.now() - 2500)));
+    // The lib snaps the center to a 0.01° grid with a fixed radius and caches the answer; the per-client
+    // gate runs only on a cache miss (a billable call).
+    const sLat = snapGrid(cLat), sLng = snapGrid(cLng);
+    if (hasRentcast() && inUS(sLat, sLng)) {
+      const gate = async () => (await RL.hit('rc-list', ip, PAID_PER_CLIENT)).ok;
+      const listings = await rentcastListings(sLat, sLng, null, geoP, Math.max(1000, Math.min(7000, deadline - Date.now() - 2500)), { gate });
       if (listings && listings.length) {
         const out = { source: 'rentcast', listings, attribution: 'Listings and values: RentCast' };
-        _cache.set(cacheKey, out);
-        return reply(event, out, 200, posted ? 'no-store' : 'public, max-age=300');
+        if (!posted) _cache.set(cacheKey, out);
+        return reply(out);
       }
     }
 
     let osmP;
     if (posted) osmP = { elements: posted };
-    else if (_ipOverpass(ip)) {
+    else if ((await RL.hit('re-overpass', ip, OVERPASS_PER_CLIENT)).ok) {
       const bbox = [south, west, north, east].map(n => n.toFixed(6)).join(',');   // numbers only → no QL injection
       const query = `[out:json][timeout:12][maxsize:16777216];
 nwr["addr:housenumber"]["addr:street"](${bbox})->.a;
@@ -176,7 +193,7 @@ out center tags 60;`;
         if (name && streets.length < 200) streets.push({ name, lat, lng });
         continue;
       }
-      if (t.shop || t.amenity || t.office || t.tourism || t.craft || t.leisure || (typeof t.building === 'string' && NOT_HOME.has(t.building))) continue;
+      if (t.shop || t.amenity || t.office || t.tourism || t.craft || t.leisure || NOT_HOME.has(str(t.building))) continue;
       const num0 = cleanText(t['addr:housenumber'], 40).split(/[;,]/)[0].trim();
       if (!num0 || num0.length > 6 || !/\d/.test(num0)) continue;   // drops junk tags like "60865201"
       const street = cleanText(t['addr:street'], 80);
@@ -186,10 +203,11 @@ out center tags 60;`;
       const key = address.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      const yb = /^\d{4}$/.test(String(t.start_date || '')) ? Number(t.start_date) : 0;
+      const sd = cleanText(t.start_date, 10);
+      const yb = /^\d{4}$/.test(sd) ? Number(sd) : 0;
       real.push({ address, city: cleanText(t['addr:city'], 60) || hintCity, state: cleanText(t['addr:state'], 30) || hintState,
-        zip: String(t['addr:postcode'] || '').replace(/\D/g, '').slice(0, 5),
-        lat, lng, osmBuilding: typeof t.building === 'string' ? t.building.slice(0, 40) : '', levels: num(t['building:levels']) || 0,
+        zip: cleanText(t['addr:postcode'], 20).replace(/\D/g, '').slice(0, 5),
+        lat, lng, osmBuilding: cleanText(t.building, 40), levels: num(t['building:levels']) || 0,
         footprintSqft: el.type === 'way' ? footprintSqft(b) : 0,
         yearBuilt: yb >= 1600 && yb <= maxYear ? yb : 0, source: 'osm' });
     }
@@ -228,8 +246,21 @@ out center tags 60;`;
     const listings = picked.map(h => estimateHome(Object.assign(h, { geo, state: h.state || stFallback || '' })));
     const out = { source: real.length ? 'osm' : 'synthetic', listings, attribution: OSM_ATTR, dataLevel: geo ? 'tract' : 'state', osmOk: !!osm };
     if (osm && !posted) _cache.set(cacheKey, out);     // don't cache an Overpass outage or client-supplied data
-    return reply(event, out, 200, posted || !osm ? 'no-store' : 'public, max-age=300');
+    return reply(out);
   } catch {
-    return reply(event, { listings: [], error: 'unavailable' });
+    return reply({ listings: [], error: 'unavailable' });
   }
-};
+}
+
+// Firewall first: method/Origin checks, the per-client limit (durable, across instances) and the 256 KB
+// body cap all run before the body is touched. json:false → the body is parsed here, after the
+// nesting-depth pre-scan. Responses are no-store (the app POSTs; POST answers aren't cacheable anyway).
+exports.handler = withFirewall(handle, {
+  name: 're-listings',
+  methods: ['GET', 'POST'],
+  rateLimit: { windowMs: 5 * 60 * 1000, max: 60 },           // requests per client per 5 min
+  durable: true,
+  maxBodyBytes: MAX_BODY,
+  json: false,
+  allowedOrigins: ['https://nextgenwealthproject.netlify.app'],
+});

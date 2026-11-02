@@ -5,12 +5,21 @@
  *   200 { token, user: { name, email, free_access } }
  *   401 { error: 'Incorrect email or password.' }   any credential failure (unknown email, wrong
  *                                                   password, malformed input) — one message, padded timing
- *   429 { error }                                   rate limited (per IP via the firewall, per email here)
+ *   429 { error }  (+ Retry-After)                  too many failures for this email or this IP
  *   503 { error }                                   server misconfigured / database unavailable
  *
- * pw_hash may be the legacy 32-bit djb2 hash (written by the old browser client and by
- * confirm-reset) or a scrypt hash. A successful legacy login transparently rewrites pw_hash as
- * scrypt with a compare-and-swap on the old value.
+ * Lockout (durable, shared by every instance via lib/ratelimit.js; IPv6 counted per /64):
+ *   10 failures per email and 30 failures per IP in a 15-minute window. Only failures are counted,
+ *   but once a limit is reached EVERY attempt for that email / from that IP is refused before the
+ *   password is checked, so a correct guess looks exactly like a wrong one (no success oracle).
+ *   Successful sign-ins never count as failures, so a classroom behind one school IP is not locked
+ *   out by correct logins. Separately, at most 20 attempts (right or wrong) per email per 15 minutes
+ *   are accepted, counted atomically before the check, so parallel bursts cannot outrun the lockout.
+ *   The firewall caps all requests at 120 per IP per 10 minutes (durable).
+ *
+ * pw_hash may be the legacy 32-bit djb2 hash (written by the old browser client and by older
+ * versions of confirm-reset) or a scrypt hash. A successful legacy login transparently rewrites
+ * pw_hash as scrypt with a compare-and-swap on the old value.
  *
  * Env: SESSION_SECRET, SUPA_SERVICE_KEY, SUPABASE_URL (optional).
  */
@@ -18,30 +27,20 @@
 
 const C = require('./lib/crypto');
 const S = require('./lib/session');
-const { withFirewall, createRateLimiter } = require('./lib/firewall');
+const RL = require('./lib/ratelimit');
+const { withFirewall } = require('./lib/firewall');
 
-const MIN_MS = 450;                 // every credential failure takes at least this long
+const MIN_MS = 450;                 // every failure / lockout takes at least this long
 const BAD = 'Incorrect email or password.';
-const failsPerEmail = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 10 });
-const failsPerIp = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 30 });
+const WINDOW = 15 * 60;
+const LIM_EMAIL = { windowSec: WINDOW, max: 10 };
+const LIM_IP = { windowSec: WINDOW, max: 30 };
+// Every attempt (right or wrong) per email, counted atomically BEFORE the check: bounds a burst of
+// parallel guesses that would all pass the failure peek() before any of them is recorded.
+const LIM_EMAIL_TRIES = { windowSec: WINDOW, max: 20 };
 
 let DUMMY_HASH = null;               // scrypt work for unknown emails / legacy rows (equal timing)
 const dummy = () => (DUMMY_HASH ||= C.hashSecret(C.randomToken(16)));
-
-/** Peek at a limiter without counting (limiter counts on every call, so we only call it on failure). */
-const blocked = new Map();
-function isBlocked(key) {
-  const until = blocked.get(key);
-  if (!until) return false;
-  if (until <= Date.now()) { blocked.delete(key); return false; }
-  return true;
-}
-function recordFail(key, limiter, windowMs) {
-  if (!limiter(key).ok) {
-    if (blocked.size > 5000) for (const [k, u] of blocked) if (u <= Date.now()) blocked.delete(k);
-    blocked.set(key, Date.now() + windowMs);
-  }
-}
 
 async function login(event) {
   const started = Date.now();
@@ -52,26 +51,34 @@ async function login(event) {
   const b = event.jsonBody || {};
   const email = S.normEmail(b.email);
   const password = typeof b.password === 'string' && b.password.length <= S.PW_MAX ? b.password : '';
-  const ipKey = 'ip:' + C.clientIp(event);
-  const emailKey = 'em:' + (email || '-');
-
-  if (isBlocked(ipKey) || (email && isBlocked(emailKey))) {
-    await S.padTo(started, MIN_MS);
-    return S.json(429, { error: 'Too many failed attempts. Please wait 15 minutes and try again.' });
-  }
+  const ip = RL.ipKey(event.headers);
 
   const fail = async () => {
-    recordFail(ipKey, failsPerIp, 15 * 60 * 1000);
-    if (email) recordFail(emailKey, failsPerEmail, 15 * 60 * 1000);
+    await Promise.all([
+      RL.hit('login-fail-ip', ip, LIM_IP),
+      email ? RL.hit('login-fail-email', email, LIM_EMAIL) : null,
+    ]);
     await S.padTo(started, MIN_MS);
     return S.json(401, { error: BAD });
   };
 
   if (!email || !password || !S.pwForLegacy(password)) { C.verifySecret('x', dummy()); return fail(); }
 
-  const g = await S.getUser(email);
+  // Lockout check and user lookup in parallel (same latency for every outcome).
+  const [ipState, emailState, tries, g] = await Promise.all([
+    RL.peek('login-fail-ip', ip, LIM_IP),
+    RL.peek('login-fail-email', email, LIM_EMAIL),
+    RL.hit('login-try-email', email, LIM_EMAIL_TRIES),
+    S.getUser(email),
+  ]);
+  if (!ipState.ok || !emailState.ok || !tries.ok) {
+    C.verifySecret(S.pwForScrypt(password), dummy());          // same work as a real check
+    await S.padTo(started, MIN_MS);
+    const wait = Math.max(ipState.retryAfter || 0, emailState.retryAfter || 0, tries.retryAfter || 0) || WINDOW;
+    return S.json(429, { error: 'Too many failed attempts. Please wait 15 minutes and try again.' }, { 'Retry-After': String(wait) });
+  }
   if (g.error === 'db') { await S.padTo(started, MIN_MS); return S.json(503, { error: 'Sign-in is unavailable right now. Please try again in a minute.' }); }
-  const user = g.user;
+  const user = g.user;   // a duplicate-rows error is treated as "no such user"
   const stored = user && typeof user.pw_hash === 'string' ? user.pw_hash : '';
 
   let ok = false, legacy = false;
@@ -104,8 +111,9 @@ exports.handler = withFirewall(login, {
   name: 'auth-login',
   methods: ['POST'],
   // Generous per-IP request cap (a whole class can sign in from one school IP); failed attempts
-  // are limited much harder above (10 per email / 30 per IP per 15 min).
+  // are limited much harder above (10 per email / 30 per IP per 15 min, durable).
   rateLimit: { windowMs: 10 * 60 * 1000, max: 120 },
+  durable: true,
   maxBodyBytes: 1024,
   json: true,
   inspect: false,   // passwords are never interpolated anywhere; the filter would block valid ones

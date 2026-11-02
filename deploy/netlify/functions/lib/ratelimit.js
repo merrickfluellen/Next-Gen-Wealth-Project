@@ -23,6 +23,13 @@
  *       Use failClosed for anything that costs money or protects secrets when you prefer
  *       "unavailable" over "unlimited".
  *
+ *   await peek(bucket, key, { windowSec, max, failClosed = false }) → { ok, count, retryAfter }
+ *       Reads the current count for (bucket, key) WITHOUT counting an event; ok = count < max, i.e.
+ *       "one more event would still be allowed". For lockouts that count only FAILURES: peek() before
+ *       doing the work (refuse every attempt, right or wrong, once locked — no success oracle), hit()
+ *       only when the attempt failed. Never throws. On a DB error: in-memory value, or { ok:false }
+ *       when failClosed.
+ *
  *   await budget(name, { windowSec, max, failClosed = true }) → { ok, count, retryAfter }
  *       A GLOBAL cap (one counter for the whole site), e.g. paid API calls per hour or emails per
  *       day. Same as hit(name, '*', …) but fails closed by default.
@@ -227,6 +234,52 @@ async function hit(bucket, key, { windowSec, max, failClosed = false } = {}) {
   return memHit(fullKey, w, m);
 }
 
+async function dbPeek(fullKey, windowSec) {
+  if (process.env.RATE_LIMIT_DB === 'off' || Date.now() < dbDownUntil) return null;
+  const S = require('./session');
+  if (!process.env.SUPA_SERVICE_KEY) return null;
+  // The newest live window for this key (no exact window_start match, so small clock skew between
+  // this instance and the database cannot make a live counter invisible).
+  const r = await S.supa('GET', 'rate_counters?key=eq.' + encodeURIComponent(fullKey) +
+    '&expires_at=gt.' + encodeURIComponent(new Date().toISOString()) +
+    '&select=count&order=window_start.desc&limit=1', { timeoutMs: DB_TIMEOUT_MS });
+  if (r.status >= 200 && r.status < 300 && Array.isArray(r.data)) {
+    const n = r.data[0] ? Number(r.data[0].count) : 0;
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  dbDownUntil = Date.now() + DB_COOLDOWN_MS;
+  console.error(`ratelimit: peek failed (status ${r.status}); using memory (or failing closed) for ${DB_COOLDOWN_MS / 1000}s`);
+  return null;
+}
+
+/**
+ * Current count for (bucket, key) without counting an event. ok = count < max. Never throws.
+ * @param {string} bucket
+ * @param {string} key
+ * @param {{windowSec:number, max:number, failClosed?:boolean}} opts
+ */
+async function peek(bucket, key, { windowSec, max, failClosed = false } = {}) {
+  const w = Math.floor(Number(windowSec));
+  const m = Math.floor(Number(max));
+  if (!(w >= 1 && w <= MAX_WINDOW_SEC) || !(m >= 0)) {
+    console.error('ratelimit: bad windowSec/max for bucket ' + bucket);
+    return { ok: false, count: 0, retryAfter: 60 };
+  }
+  const fullKey = storageKey(bucket, w, key);
+  let n = null;
+  try { n = await dbPeek(fullKey, w); } catch { n = null; }
+  if (n === null) {
+    if (failClosed) return { ok: false, count: 0, retryAfter: Math.min(w, 60) };
+    const now = Date.now();
+    const e = mem.get(fullKey);
+    if (!e || e.resetAt <= now) return { ok: m > 0, count: 0, retryAfter: 0 };
+    const ok = e.count < m;
+    return { ok, count: e.count, retryAfter: ok ? 0 : Math.max(1, Math.ceil((e.resetAt - now) / 1000)) };
+  }
+  const ok = n < m;
+  return { ok, count: n, retryAfter: ok ? 0 : windowRemaining(w) };
+}
+
 /**
  * Global (site-wide) budget, e.g. paid API calls per hour. Fails closed by default.
  * @param {string} name
@@ -237,7 +290,7 @@ function budget(name, { windowSec, max, failClosed = true } = {}) {
 }
 
 module.exports = {
-  ipKey, hit, budget,
+  ipKey, hit, peek, budget,
   // exposed for tests / other libs; not part of the stable API
   _normalizeIp: normalizeIp,
   _memHit: memHit,

@@ -1,6 +1,6 @@
 /**
  * map-config — which map tiles the Money City map should use.
- * GET /.netlify/functions/map-config → { url, attribution, subdomains, maxZoom, provider, darkFilter }
+ * GET /.netlify/functions/map-config → { provider, url, subdomains, maxZoom, darkFilter, attribution }
  *
  * Set ONE of these in Netlify → Site configuration → Environment variables:
  *   MAPTILER_KEY     (maptiler.com → Account → API keys)        → dark "dataviz" map
@@ -15,17 +15,27 @@
  * Use a dedicated tiles-only key with no other scopes. With no key, the app uses standard OpenStreetMap
  * tiles with a dark filter (fine for light use, per the OSM tile policy).
  *
- * Only the tile URL template + display fields are returned. No CORS header is sent: the app calls this
- * same-origin, so other sites can't read the config cross-origin from a browser.
+ * Only the provider name, a fixed tile URL template per provider (+ the validated key) and display
+ * numbers are returned. The app picks the attribution HTML itself from `provider` (Leaflet writes it
+ * with innerHTML, so it must never come from the network). `attribution` is still sent for older
+ * clients, as PLAIN TEXT (no markup), so even an old client that renders it can't be handed HTML.
+ * lib/firewall.js in front (GET/HEAD, Origin allow-list, light per-IP limit); no CORS for other sites.
  */
+const { withFirewall } = require('./lib/firewall');
+
 const KEY_RE = /^[A-Za-z0-9_-]{8,128}$/;   // MapTiler / Stadia keys are short alphanumeric (+ dashes) tokens
 
-const BASE_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'X-Content-Type-Options': 'nosniff' };
 // 10 min so a rotated/revoked key stops being handed out quickly.
-const CACHE_HEADERS = { 'Cache-Control': 'public, max-age=600', 'Netlify-CDN-Cache-Control': 'public, s-maxage=600' };
+const CACHE_CONTROL = 'public, max-age=600';
+const CDN_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Netlify-CDN-Cache-Control': 'public, s-maxage=600' };
 
-const OSM = { provider: 'osm', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', subdomains: '', maxZoom: 19, darkFilter: true };
+// Plain-text attribution (back-compat only; the app uses its own linked HTML per provider).
+const ATTR = {
+  osm: '© OpenStreetMap contributors',
+  maptiler: '© MapTiler © OpenStreetMap contributors',
+  stadia: '© Stadia Maps © OpenMapTiles © OpenStreetMap contributors',
+};
+const OSM = { provider: 'osm', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: '', maxZoom: 19, darkFilter: true, attribution: ATTR.osm };
 
 function cleanKey(name) {
   const v = (process.env[name] || '').trim();
@@ -36,20 +46,21 @@ function buildConfig() {
   const mt = cleanKey('MAPTILER_KEY');
   if (mt) {
     return { provider: 'maptiler', url: 'https://api.maptiler.com/maps/dataviz-dark/256/{z}/{x}/{y}.png?key=' + encodeURIComponent(mt),
-      attribution: '© <a href="https://www.maptiler.com/copyright/">MapTiler</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', subdomains: '', maxZoom: 19, darkFilter: false };
+      subdomains: '', maxZoom: 19, darkFilter: false, attribution: ATTR.maptiler };
   }
   const st = cleanKey('STADIA_API_KEY');
   if (st) {
     return { provider: 'stadia', url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png?api_key=' + encodeURIComponent(st),
-      attribution: '© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://openmaptiles.org/">OpenMapTiles</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', subdomains: '', maxZoom: 20, darkFilter: false };
+      subdomains: '', maxZoom: 20, darkFilter: false, attribution: ATTR.stadia };
   }
   return OSM;
 }
 
-exports.handler = async (event) => {
-  const method = ((event && event.httpMethod) || 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    return { statusCode: 405, headers: { ...BASE_HEADERS, 'Cache-Control': 'no-store', Allow: 'GET, HEAD' }, body: JSON.stringify({ error: 'Method not allowed' }) };
-  }
-  return { statusCode: 200, headers: { ...BASE_HEADERS, ...CACHE_HEADERS }, body: JSON.stringify(buildConfig()) };
-};
+// cacheControl applies to the 200 only; firewall errors (405/403/429) are always no-store.
+exports.handler = withFirewall(async () => ({ statusCode: 200, headers: CDN_HEADERS, body: JSON.stringify(buildConfig()) }), {
+  name: 'map-config',
+  methods: ['GET', 'HEAD'],
+  rateLimit: { windowMs: 60 * 1000, max: 30 },
+  json: false,
+  cacheControl: CACHE_CONTROL,
+});

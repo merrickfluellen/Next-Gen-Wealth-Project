@@ -14,28 +14,23 @@
  *     is dead (single use);
  *   - encryption makes decoy tokens for unknown emails indistinguishable from real ones.
  *
- * Durable state (table public.password_resets, see SQL below): one row per issued code, keyed by
- * the nonce, holding `attempts` and `used` (unknown emails get a row too, so confirm-reset cannot be
- * used to tell real accounts from decoys). confirm-reset claims an attempt slot with a
- * compare-and-swap BEFORE checking the code, so a code can be guessed at most 5 times in total,
- * across every function instance and IP. Issuing a new code retires the older ones for that
- * email, and at most 3 codes per email per hour are emailed (anti email-bombing).
- * If the table does not exist yet, both functions fall back to the old per-instance in-memory
- * limits and log an error on every request — create the table:
+ * Durable state: table public.password_resets (supabase/001_security.sql Part A, A4b), one row per
+ * issued code, keyed by the nonce, holding `attempts` and `used`. confirm-reset claims an attempt
+ * slot with a compare-and-swap BEFORE checking the code, so a code can be guessed at most 5 times
+ * in total, across every function instance and IP (and at most 10 guesses per email per day across
+ * all codes — see confirm-reset). Issuing a new code retires the older ones for that email.
  *
- *   create table if not exists public.password_resets (
- *     id         text primary key,                 -- token nonce
- *     email      text not null,
- *     attempts   int  not null default 0,
- *     used       boolean not null default false,
- *     expires_at timestamptz not null,
- *     created_at timestamptz not null default now()
- *   );
- *   create index if not exists password_resets_email_created on public.password_resets (email, created_at desc);
- *   alter table public.password_resets enable row level security;
- *   revoke all on table public.password_resets from anon, authenticated, public;
- *   grant  all on table public.password_resets to service_role;
- *   -- housekeeping (e.g. daily; unknown emails also create rows): delete from public.password_resets where created_at < now() - interval '2 days';
+ * Unknown emails get a row too: that is what makes every later answer from confirm-reset identical
+ * for real and unknown addresses. To keep this from storing whatever address anyone types, the
+ * row's `email` column holds emailRef(email) — a keyed HMAC ("h1:…"), never the address itself —
+ * and rows are deleted after 2 days by the pg_cron job in Part A (A11).
+ *
+ * Email limits (anti email-bombing / protects the Resend quota). When a limit is reached no email is
+ * sent and the response is the usual decoy:
+ *   - 3 codes per email per hour (durable, via password_resets) and 5 emails per email per day;
+ *   - 20 reset requests per IP per day (durable; IPv6 per /64), firewall 10 per 15 min;
+ *   - global: RESET_EMAILS_PER_DAY (default 80) emails per day for the whole site. Fails closed:
+ *     if the counter cannot be read, no email is sent.
  *
  * No user enumeration: unknown email, rate-limited, mail-provider failure and success all return
  * the same body (with a decoy token where needed) and are padded to the same minimum time.
@@ -43,8 +38,11 @@
  * Required Netlify env vars:
  *   SUPA_SERVICE_KEY  — Supabase service role key
  *   SESSION_SECRET    — master secret (keys derived via HKDF, see lib/crypto.js)
- *   RESEND_API_KEY    — Resend.com API key
- *   RESEND_FROM       — (optional) verified sender; default onboarding@resend.dev
+ *   RESEND_API_KEY    — Resend.com API key (without it no email is ever sent; logged only)
+ *   RESEND_FROM       — verified sender; the default onboarding@resend.dev only delivers to the
+ *                       Resend account owner, so set it in production
+ *   RESET_EMAILS_PER_DAY — (optional) site-wide daily email cap, default 80; keep it below the
+ *                       Resend plan's daily quota
  *   SUPABASE_URL      — (optional) see lib/session.js
  */
 
@@ -52,11 +50,22 @@
 
 const C = require('./lib/crypto');
 const S = require('./lib/session');
+const RL = require('./lib/ratelimit');
 const { withFirewall } = require('./lib/firewall');
 
 const CODE_TTL_MS        = 15 * 60 * 1000;   // 15 minutes (the email says so too)
-const MIN_RESPONSE_MS    = 2500;             // pad every response to hide which path ran
+// Pad every response to hide which path ran. The slowest normal path (known email: lookup, 4 DB
+// calls, 2 counters, one Resend call) takes well under a second; Resend calls slower than the pad
+// are logged.
+const MIN_RESPONSE_MS    = 1800;
 const PER_EMAIL_PER_HOUR = 3;
+const DAY = 86400;
+const LIM_EMAIL_DAY = { windowSec: DAY, max: 5 };
+const LIM_IP_DAY = { windowSec: DAY, max: 20 };
+function emailsPerDay() {
+  const n = parseInt(process.env.RESET_EMAILS_PER_DAY || '', 10);
+  return Number.isFinite(n) && n >= 0 && n <= 100000 ? n : 80;
+}
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
@@ -65,6 +74,10 @@ function codeMac(nonce, email, code) {
 }
 function pwBinding(email, pwHash) {
   return C.hmac('reset-pw-binding', `${email}|${pwHash == null ? '' : String(pwHash)}`).toString('base64url');
+}
+/** What password_resets.email holds: a keyed HMAC of the address, never the address (see header). */
+function emailRef(email) {
+  return 'h1:' + C.hmac('reset-email-ref', email).toString('base64url');
 }
 /** PostgREST answers 404 / PGRST205 / 42P01 when the table has not been created yet. */
 const storeMissing = (r) => r.status === 404 || !!(r.error && (r.error.code === 'PGRST205' || r.error.code === '42P01'));
@@ -88,13 +101,14 @@ function safeName(name) {
 
 /**
  * Records a new code in password_resets — for real AND unknown emails alike, so confirm-reset
- * behaves identically for both (no enumeration oracle). Returns 'ok' | 'limited' | 'missing' | 'error'.
+ * behaves identically for both (no enumeration oracle). The row stores emailRef(email). Returns 'ok' | 'limited' | 'missing' | 'error'.
  * The per-email cap is race-safe: after inserting, only the first PER_EMAIL_PER_HOUR rows of the
  * last hour (by created_at, id) are allowed; a row that lost the race is retired immediately.
  */
 async function recordReset(email, nonce, expiry) {
+  const ref = emailRef(email);
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const windowQ = `password_resets?email=eq.${S.q(email)}&created_at=gte.${S.q(since)}&select=id` +
+  const windowQ = `password_resets?email=eq.${S.q(ref)}&created_at=gte.${S.q(since)}&select=id` +
     `&order=created_at.asc,id.asc&limit=${PER_EMAIL_PER_HOUR}`;
   const recent = await S.supa('GET', windowQ);
   if (storeMissing(recent)) return 'missing';
@@ -103,7 +117,7 @@ async function recordReset(email, nonce, expiry) {
 
   const createdAt = new Date().toISOString();
   const ins = await S.supa('POST', 'password_resets',
-    { body: { id: nonce, email, attempts: 0, used: false, expires_at: new Date(expiry).toISOString(), created_at: createdAt }, prefer: 'return=minimal' });
+    { body: { id: nonce, email: ref, attempts: 0, used: false, expires_at: new Date(expiry).toISOString(), created_at: createdAt }, prefer: 'return=minimal' });
   if (!S.ok2xx(ins)) return 'error';
 
   const first = await S.supa('GET', windowQ);
@@ -112,13 +126,14 @@ async function recordReset(email, nonce, expiry) {
     return S.ok2xx(first) ? 'limited' : 'error';
   }
   // Retire every OLDER open code for this email (only the newest code works).
-  const retire = await S.supa('PATCH', `password_resets?email=eq.${S.q(email)}&used=is.false&created_at=lt.${S.q(createdAt)}`,
+  const retire = await S.supa('PATCH', `password_resets?email=eq.${S.q(ref)}&used=is.false&created_at=lt.${S.q(createdAt)}`,
     { body: { used: true }, prefer: 'return=minimal' });
   if (!S.ok2xx(retire)) console.error('reset-password: could not retire older codes');
   return 'ok';
 }
 
 async function sendEmail(email, userName, code) {
+  const t0 = Date.now();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
@@ -155,6 +170,8 @@ async function sendEmail(email, userName, code) {
     return 0;
   } finally {
     clearTimeout(timer);
+    const ms = Date.now() - t0;
+    if (ms > MIN_RESPONSE_MS - 600) console.warn(`reset-password: Resend took ${ms} ms (longer than the response pad allows for)`);
   }
 }
 
@@ -183,8 +200,10 @@ async function resetPassword(event) {
     return decoy();
   }
 
-  // Cheap per-instance guards (the durable per-email limit is in recordReset).
+  // Cheap per-instance guard first (the durable per-email limit is in recordReset).
   if (C.throttled('reset:email:' + email, PER_EMAIL_PER_HOUR, 60 * 60 * 1000)) return decoy();
+  const perIp = await RL.hit('reset-ip-day', RL.ipKey(event.headers), LIM_IP_DAY);
+  if (!perIp.ok) return decoy();
 
   const g = await S.getUser(email, 'email,name,pw_hash');
   if (g.error === 'db') return decoy();
@@ -198,12 +217,22 @@ async function resetPassword(event) {
   // confirm-reset is the same whether or not the account exists.
   const rec = await recordReset(email, nonce, expiry);
   if (rec === 'missing') {
-    console.error('reset-password: table public.password_resets is missing — using per-instance limits only. Create it (SQL in reset-password.js).');
+    console.error('reset-password: table public.password_resets is missing — using per-instance limits only. Run supabase/001_security.sql Part A.');
   } else if (rec !== 'ok') {
     if (rec === 'error') console.error('reset-password: could not record the reset code');
     return decoy();   // no email sent; same response as everything else
   }
   if (!user) return finish({ ok: true, verifyToken: makeVerifyToken(email, null, null, nonce, expiry) });
+
+  // Email budgets: per address per day, then site-wide per day (fails closed). Over budget → the
+  // row stays recorded, but the token is a decoy and nothing is sent (same answer as always).
+  const perEmail = await RL.hit('reset-email-day', emailRef(email), LIM_EMAIL_DAY);
+  if (!perEmail.ok) return finish({ ok: true, verifyToken: makeVerifyToken(email, null, null, nonce, expiry) });
+  const site = await RL.budget('reset-email', { windowSec: DAY, max: emailsPerDay() });
+  if (!site.ok) {
+    console.error('reset-password: daily reset-email budget reached (RESET_EMAILS_PER_DAY) — no email sent');
+    return finish({ ok: true, verifyToken: makeVerifyToken(email, null, null, nonce, expiry) });
+  }
 
   const status = await sendEmail(email, safeName(user.name), code);
   if (status < 200 || status >= 300) {
@@ -217,7 +246,8 @@ exports.handler = withFirewall(resetPassword, {
   name: 'reset-password',
   methods: ['POST'],
   rateLimit: { windowMs: 15 * 60 * 1000, max: 10 },
+  durable: true,
   maxBodyBytes: 1024,
   json: true,
 });
-exports._internals = { codeMac, pwBinding, safeName };
+exports._internals = { codeMac, pwBinding, safeName, emailRef };

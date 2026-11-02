@@ -6,11 +6,14 @@
  *
  * 1. Decrypts the AES-256-GCM verifyToken from reset-password (tamper-proof), checks email and
  *    expiry.
- * 2. Claims one attempt slot on the token's public.password_resets row with a compare-and-swap
+ * 2. Counts the guess against a per-email DAILY cap (10 guesses per email per 24 h across ALL codes,
+ *    durable via lib/ratelimit.js, keyed by the same keyed HMAC of the email reset-password stores —
+ *    fails closed). Requesting fresh codes therefore cannot multiply the 5-per-code allowance.
+ *    Then claims one attempt slot on the token's public.password_resets row with a compare-and-swap
  *    (attempts=N → N+1, only while used=false and N < 5) BEFORE looking at the code, so at most
  *    5 guesses per code exist across all instances/IPs. Concurrent guesses that lose the CAS are
- *    rejected without being checked. (If the table is missing: per-instance limits only; see
- *    reset-password.js for the SQL.)
+ *    rejected without being checked. (If the table is missing: per-instance limits only; run
+ *    supabase/001_security.sql Part A.)
  * 3. Checks the code's keyed MAC (constant-time) and that the token is still bound to the user's
  *    CURRENT pw_hash, then writes a scrypt hash with a compare-and-swap on the old pw_hash — so a
  *    token works exactly once (replay after a successful reset fails), and every existing user
@@ -29,9 +32,11 @@
 
 const C = require('./lib/crypto');
 const S = require('./lib/session');
+const RL = require('./lib/ratelimit');
 const { withFirewall } = require('./lib/firewall');
 
 const MAX_CODE_TRIES = 5;
+const LIM_GUESSES_DAY = { windowSec: 86400, max: 10, failClosed: true };
 
 const MSG = {
   noToken:  'Invalid or expired code. Check that the email is the one on your account, then request a new code.',
@@ -40,6 +45,7 @@ const MSG = {
   expired:  'This code has expired. Please request a new one.',
   wrong:    'Incorrect code. Check your email and try again.',
   tooMany:  'Invalid code entered too many times. Please request a new one.',
+  daily:    'Too many wrong tries for this email today. Please wait 24 hours and start over.',
   used:     'Invalid or already-used code. Please request a new one.',
   busy:     'Please wait a moment and try again.',
   failed:   'Failed to update password. Please try again.',
@@ -51,6 +57,10 @@ const usedNonces = new Map();
 
 function codeMac(nonce, email, code) {
   return C.hmac('reset-code', `${nonce}|${email}|${code}`).toString('base64url');
+}
+/** Must stay identical to emailRef() in reset-password.js (what password_resets.email holds). */
+function emailRef(email) {
+  return 'h1:' + C.hmac('reset-email-ref', email).toString('base64url');
 }
 function pwBinding(email, pwHash) {
   return C.hmac('reset-pw-binding', `${email}|${pwHash == null ? '' : String(pwHash)}`).toString('base64url');
@@ -74,7 +84,8 @@ async function claimAttempt(nonce, email, expiry) {
   }
   if (!S.ok2xx(cur)) return { error: MSG.failed };
   const row = S.rows(cur)[0];
-  if (!row || row.email !== email || row.used === true) return { error: MSG.used };
+  // Rows hold emailRef(email); a plain address can only be a row written before that change.
+  if (!row || (row.email !== emailRef(email) && row.email !== email) || row.used === true) return { error: MSG.used };
   const n = Number(row.attempts);
   if (!Number.isInteger(n) || n < 0) return { error: MSG.failed };
   if (n >= MAX_CODE_TRIES) return { error: MSG.tooMany };
@@ -119,7 +130,10 @@ async function confirmReset(event) {
   if (Date.now() > t.x) return reply({ error: MSG.expired });
   if (usedNonces.has(t.n)) return reply({ error: MSG.used });
 
-  // 2. Claim a guess (durable, CAS) before the code is looked at.
+  // 2. Per-email daily guess cap (all codes), then claim a guess on this code (durable, CAS),
+  //    both before the code is looked at.
+  const daily = await RL.hit('reset-guess', emailRef(email), LIM_GUESSES_DAY);
+  if (!daily.ok) return reply({ error: daily.count === 0 ? MSG.busy : MSG.daily });
   const slot = await claimAttempt(t.n, email, t.x);
   if (slot.error) return reply({ error: slot.error });
 
@@ -161,6 +175,7 @@ exports.handler = withFirewall(confirmReset, {
   name: 'confirm-reset',
   methods: ['POST'],
   rateLimit: { windowMs: 15 * 60 * 1000, max: 20 },
+  durable: true,
   maxBodyBytes: 4096,
   json: true,
   inspect: false,   // the body carries a new password; the signature filter would reject valid ones

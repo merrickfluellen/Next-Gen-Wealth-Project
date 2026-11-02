@@ -13,7 +13,7 @@
  *            (see the audit, C3), so they are only accepted while env LEGACY_CODES is not 'off',
  *            and every legacy hash can be redeemed exactly ONCE in total (code_redemptions has
  *            UNIQUE(code_hash)), which caps the damage of forgery at the size of this list.
- *            Copied verbatim from validate-code.js — keep in sync until that function is retired.
+ *            (validate-code.js, which held a copy, has been removed.)
  */
 'use strict';
 
@@ -64,7 +64,7 @@ const FREE_SET = new Set(FREE_CODE_HASHES);
 const MAX_CODE_LEN = 64;
 const PRINTABLE_RE = /^[\x20-\x7E]+$/;
 
-/** Legacy normalisation, identical to validate-code.js / the old client: NFKC + trim + uppercase. */
+/** Legacy normalisation, identical to the old client (and the retired validate-code.js): NFKC + trim + uppercase. */
 function normalizeLegacy(code) {
   if (typeof code !== 'string' || code.length > MAX_CODE_LEN * 4) return null;
   const n = code.normalize('NFKC').trim().toUpperCase();
