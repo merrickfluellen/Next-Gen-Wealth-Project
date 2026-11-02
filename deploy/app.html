@@ -2918,11 +2918,13 @@ const dbGetUser = async (email) => {
   catch { return null; }
 };
 const dbCreateUser = async (user) => {
-  if (!db) return;
+  if (!db) return false;
   try {
-    await db.from('users').insert({ email: user.email, name: user.name, pw_hash: user.pw, free_access: user.freeAccess || false });
+    const { error } = await db.from('users').insert({ email: user.email, name: user.name, pw_hash: user.pw, free_access: user.freeAccess || false });
+    if (error) { console.warn('DB create user:', error); return false; }
     await db.from('progress').insert({ email: user.email, portfolio: {"cash": 0, "investments": [], "debt": 0} });
-  } catch(err) { console.warn('DB create user:', err); }
+    return true;
+  } catch(err) { console.warn('DB create user:', err); return false; }
 };
 const dbLoadProgress = async (email) => {
   if (!db) return null;
@@ -3040,14 +3042,16 @@ const validateCode = async (code) => {
   } catch { /* fall through */ }
   return { valid: false, free: false, unavailable: true };
 };
+// The tester account used to sign in against a password hash hard-coded here. That hash is public and trivially
+// collidable (32-bit), so it was a back door; the tester now signs in like everyone else (a Supabase account).
 const TESTER_EMAIL = 'tester@invested.test';
-const TESTER_PW_HASH = 'hypn0yy14';
 const getUsedCodes = () => lsJSON('usedCodes', '[]');
 const isCodeUsedHere = (code) => getUsedCodes().includes(hashPw('code::' + code.trim().toUpperCase()));
 const burnCode = (code, email, name) => {
 const h = hashPw('code::' + code.trim().toUpperCase());
 localStorage.setItem('usedCodes', JSON.stringify([...getUsedCodes(), h]));
-const al = lsJSON('adminCodeLog', '[]'); al.push({code:code.trim().toUpperCase(), email, name, date:new Date().toISOString()}); localStorage.setItem('adminCodeLog', JSON.stringify(al));
+const _cu = code.trim().toUpperCase(), _masked = _cu.length > 4 ? '••••' + _cu.slice(-4) : '••••';   // never keep a raw code in localStorage
+const al = lsJSON('adminCodeLog', '[]'); al.push({code:_masked, email, name, date:new Date().toISOString()}); localStorage.setItem('adminCodeLog', JSON.stringify(al));
 try {
 fetch('/', {
 method: 'POST',
@@ -3062,6 +3066,8 @@ verifyAdminToken().then(ok => { if (ok) setOwner(true); }).catch(() => {});
 };
 const getUsers = () => { const v = lsJSON('investedUsers', '[]'); return Array.isArray(v) ? v : []; };
 const saveUsers = (u) => localStorage.setItem('investedUsers', JSON.stringify(u));
+// Remove the cached password hash for an account that now lives in Supabase (keeps localStorage free of credentials)
+const dropLocalPw = (email) => { try { const us = getUsers(); if (us.some(u => u.email === email && u.pw)) saveUsers(us.map(u => { if (u.email !== email) return u; const { pw, ...rest } = u; return rest; })); } catch {} };
 const getSession = () => lsJSON('investedSession', 'null');
 const setSession = (u) => localStorage.setItem('investedSession', JSON.stringify(u ? { name: u.name, email: u.email } : null));
 const openFeedback = () => {
@@ -4457,26 +4463,20 @@ const user = { name: name.trim(), email: em, pw: hashPw(password.trim()), create
 saveUsers([...users, user]);
 burnCode(accessCode, em, name.trim());
 setSession(user);
-dbCreateUser(user); // save to Supabase (non-blocking)
+dbCreateUser(user).then(ok => { if (ok) dropLocalPw(em); }); // save to Supabase (non-blocking); once it's there, stop keeping a password hash in localStorage
 trackEvent('signup', { name: user.name, email: em });
 onAuth({ name: user.name, email: user.email, isNew: true });
 } else {
-if (em === TESTER_EMAIL && hashPw(password.trim()) === TESTER_PW_HASH) {
-let tUser = users.find(u => u.email === TESTER_EMAIL);
-if (!tUser) { tUser = { name: 'Tester', email: TESTER_EMAIL, pw: TESTER_PW_HASH, created: new Date().toISOString(), isTester: true }; saveUsers([...users, tUser]); }
-setSession(tUser);
-onAuth({ name: tUser.name, email: tUser.email, isNew: !users.find(u => u.email === TESTER_EMAIL) });
-return;
-}
 // Try Supabase first, fall back to localStorage
 let verified = false;
 const dbUser = await dbGetUser(em);
 if (dbUser) {
 if (dbUser.pw_hash !== hashPw(password.trim())) { recordFailedAttempt('login::' + em); setError('Incorrect email or password.'); return; }
 // Sync Supabase user into local storage
-const localUser = { name: dbUser.name, email: dbUser.email, pw: dbUser.pw_hash, freeAccess: dbUser.free_access };
+// (no password hash in the local copy: Supabase is the source of truth for this account)
+const localUser = { name: dbUser.name, email: dbUser.email, freeAccess: dbUser.free_access };
 const existing = users.find(u => u.email === em);
-if (!existing) saveUsers([...users, localUser]);
+if (!existing) saveUsers([...users, localUser]); else dropLocalPw(em);
 setSession(localUser);
 // Load and apply progress from Supabase
 const progress = await dbLoadProgress(em);
@@ -10378,8 +10378,8 @@ const [search, setSearch] = useState('');
 const [users, setUsers] = useState(() => getUsers().filter(u => !u.isTester));
 useEffect(() => {
   if (!db) return;
-  db.from('users').select('*').neq('email', TESTER_EMAIL).order('created_at', { ascending: false })
-    .then(({ data }) => { if (data && data.length > 0) setUsers(data.map(u => ({ name: u.name, email: u.email, pw: u.pw_hash, freeAccess: u.free_access, created: u.created_at }))); });
+  db.from('users').select('name,email,free_access,created_at').neq('email', TESTER_EMAIL).order('created_at', { ascending: false })
+    .then(({ data }) => { if (data && data.length > 0) setUsers(data.map(u => ({ name: u.name, email: u.email, freeAccess: u.free_access, created: u.created_at }))); });
 }, []);
 const codeLog = lsJSON('adminCodeLog', '[]');
 const analytics = lsJSON('adminAnalytics', '[]');
@@ -10510,7 +10510,7 @@ e('div', {className:'card'},
 e('div', {style:S.title}, 'Code Redemption Log ('+codeLog.length+' entries)'),
 e('p', {style:{...S.muted,marginBottom:12,fontSize:12}},
 '⚠️ Entries are from this browser. For all devices, check your ',
-e('a', {href:'https://app.netlify.com',target:'_blank',className:'admin-link'}, 'Netlify Forms dashboard'), '.'
+e('a', {href:'https://app.netlify.com',target:'_blank',rel:'noopener noreferrer',className:'admin-link'}, 'Netlify Forms dashboard'), '.'
 ),
 codeLog.length === 0 ? e('p',{style:S.muted},'No codes redeemed on this device yet.') :
 e('table', {className:'admin-table'},
@@ -10567,10 +10567,10 @@ e('div', {className:'card',style:{marginBottom:16}},
 e('div', {style:S.title}, '📬 View Feedback & Form Submissions'),
 e('div', {className:'key-point',style:{marginBottom:16}}, 'Student feedback is collected via your Google Form. Code redemption logs are captured by Netlify Forms automatically on every signup.'),
 e('div', {style:{display:'flex',flexDirection:'column',gap:10}},
-e('a', {href:'https://app.netlify.com',target:'_blank',style:{textDecoration:'none'}},
+e('a', {href:'https://app.netlify.com',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
 e('button', {className:'btn btn-primary',style:{width:'100%',padding:'13px',textAlign:'center'}}, '🌐 Netlify Dashboard — Code Redemption Forms')
 ),
-e('a', {href:'https://docs.google.com/forms/',target:'_blank',style:{textDecoration:'none'}},
+e('a', {href:'https://docs.google.com/forms/',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
 e('button', {className:'btn btn-secondary',style:{width:'100%',padding:'13px',textAlign:'center'}}, '📋 Google Forms — Student Feedback Responses')
 )
 ),
@@ -10586,10 +10586,10 @@ e('div', {className:'card'},
 e('div', {style:S.title}, '📊 Website Traffic'),
 e('p', {style:{...S.muted,marginBottom:14}}, 'Connect an analytics service for real-time traffic, visitor counts, and session data.'),
 e('div', {style:{display:'flex',gap:10}},
-e('a', {href:'https://app.netlify.com/sites',target:'_blank',style:{textDecoration:'none'}},
+e('a', {href:'https://app.netlify.com/sites',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
 e('button', {className:'btn btn-primary',style:{fontSize:13}}, '📈 Netlify Analytics')
 ),
-e('a', {href:'https://analytics.google.com',target:'_blank',style:{textDecoration:'none'}},
+e('a', {href:'https://analytics.google.com',target:'_blank',rel:'noopener noreferrer',style:{textDecoration:'none'}},
 e('button', {className:'btn btn-secondary',style:{fontSize:13}}, '📊 Google Analytics')
 )
 )

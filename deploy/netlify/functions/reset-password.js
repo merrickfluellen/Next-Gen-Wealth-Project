@@ -1,103 +1,137 @@
 /**
  * reset-password — step 1 of 3
  * POST { email }
- *   → { ok: true, verifyToken: "..." }
+ *   → 200 { ok: true, verifyToken: "..." }   (ALWAYS — see "No user enumeration" below)
  *
- * Checks Supabase for the email, generates a 6-digit code, emails it,
- * and returns a signed verifyToken so the client can prove it received the code.
+ * Looks the email up in Supabase, generates a 6-digit code, emails it, and
+ * returns an opaque verifyToken the client hands back to confirm-reset.
+ *
+ * verifyToken = AES-256-GCM( { e: email, x: expiry, n: nonce,
+ *                               c: HMAC(nonce|email|code), p: HMAC(email|current pw_hash) } )
+ *   - the code is never in the token, only a keyed MAC of it;
+ *   - `p` binds the token to the CURRENT password hash, so once the password is
+ *     changed the token is dead (single use). It is encrypted because the legacy
+ *     pw_hash is only 32 bits — exposing even a MAC of it to the browser is not OK;
+ *   - encryption also makes decoy tokens for unknown emails indistinguishable.
+ *
+ * No user enumeration: unknown email, rate-limited, mail-provider failure and
+ * success all return the same body shape (with a decoy token where needed) and
+ * are padded to the same minimum response time.
  *
  * Required Netlify env vars:
  *   SUPA_SERVICE_KEY  — Supabase service role key (Project Settings → API → service_role)
- *   SESSION_SECRET    — same secret used by admin-auth
+ *   SESSION_SECRET    — same secret used by admin-auth (keys derived via HKDF, see lib/crypto.js)
  *   RESEND_API_KEY    — Resend.com API key (resend.com, free tier)
+ *   RESEND_FROM       — (optional) verified sender; default onboarding@resend.dev
  */
 
-const https  = require('https');
-const crypto = require('crypto');
+'use strict';
 
-const HEADERS_OK = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
+const https = require('https');
+const C     = require('./lib/crypto');
 
-function httpsGet(hostname, path, headers) {
+const SUPA_HOST       = 'vtxuvmtnqlxidnswnunx.supabase.co';
+const CODE_TTL_MS     = 15 * 60 * 1000;   // 15 minutes (the email says so too)
+const MIN_RESPONSE_MS = 1500;             // pad every response to hide which path ran
+const EMAIL_RE        = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/;
+
+function httpsRequest(method, hostname, path, headers, body, timeoutMs = 8000) {
   return new Promise((resolve) => {
-    const req = https.request({ hostname, path, method: 'GET', headers }, res => {
-      let raw = '';
-      res.on('data', c => raw += c);
-      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve([]); } });
-    });
-    req.on('error', () => resolve([]));
-    req.end();
-  });
-}
-
-function httpsPost(hostname, path, headers, body) {
-  return new Promise((resolve) => {
-    const data = JSON.stringify(body);
+    const data = body ? JSON.stringify(body) : null;
     const req = https.request(
-      { hostname, path, method: 'POST', headers: { ...headers, 'Content-Length': Buffer.byteLength(data) } },
-      res => { let raw = ''; res.on('data', c => raw += c); res.on('end', () => resolve(res.statusCode)); }
+      { hostname, path, method, headers: { ...headers, ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}) } },
+      res => {
+        let raw = '';
+        res.on('data', c => { if (raw.length < 1e6) raw += c; });
+        res.on('end', () => resolve({ status: res.statusCode, body: raw }));
+      }
     );
-    req.on('error', () => resolve(500));
-    req.write(data);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
+    req.on('error', () => resolve({ status: 0, body: '' }));
+    if (data) req.write(data);
     req.end();
   });
 }
 
-/**
- * Signed token: base64url(email|expires).HMAC(payload|code)
- * The code is NOT inside the token (the browser gets this token, and base64 is readable);
- * it is only mixed into the signature, so the token proves nothing without the emailed code.
- */
-function makeVerifyToken(email, code, secret) {
-  const expires = Date.now() + 15 * 60 * 1000; // 15 minutes
-  const payload = Buffer.from(`${email}|${expires}`).toString('base64url');
-  const sig     = crypto.createHmac('sha256', secret).update(`${payload}|${code}`).digest('hex').slice(0, 40);
-  return `${payload}.${sig}`;
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+function codeMac(nonce, email, code) {
+  return C.hmac('reset-code', `${nonce}|${email}|${code}`).toString('base64url');
+}
+
+function pwBinding(email, pwHash) {
+  return C.hmac('reset-pw-binding', `${email}|${pwHash == null ? '' : String(pwHash)}`).toString('base64url');
+}
+
+/** Real token (code known) or decoy (code=null → random MAC that no 6-digit code can match). */
+function makeVerifyToken(email, code, pwHash) {
+  const n = C.randomToken(16);
+  return C.encryptJSON({
+    e: email,
+    x: Date.now() + CODE_TTL_MS,
+    n,
+    c: code ? codeMac(n, email, code) : C.randomToken(32),
+    p: code ? pwBinding(email, pwHash) : C.randomToken(32),
+  }, { purpose: 'reset-verify' });
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: HEADERS_OK, body: '' };
-  if (event.httpMethod !== 'POST')    return { statusCode: 405, headers: HEADERS_OK, body: JSON.stringify({ error: 'Method not allowed' }) };
+  const gate = C.methodGate(event);
+  if (gate) return gate;
+
+  const started = Date.now();
+  const finish = async (body) => {
+    const wait = MIN_RESPONSE_MS + Math.floor(Math.random() * 250) - (Date.now() - started);
+    if (wait > 0) await C.sleep(wait);
+    return C.respond(event, 200, body);
+  };
+
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    console.error('reset-password: SESSION_SECRET not configured');
+    return finish({ ok: true, verifyToken: '' });
+  }
 
   try {
     const supaKey   = process.env.SUPA_SERVICE_KEY;
-    const secret    = process.env.SESSION_SECRET;
     const resendKey = process.env.RESEND_API_KEY;
-    // RESEND_FROM: set this to a verified sender in your Resend dashboard
-    // Default: onboarding@resend.dev works on free tier without domain verification
     const fromAddr  = process.env.RESEND_FROM || 'onboarding@resend.dev';
 
-    // If core env vars missing, silently succeed so UI still advances
-    if (!supaKey || !secret || !resendKey) {
-      return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: true, verifyToken: '' }) };
+    const body  = C.parseJsonBody(event, 2048);
+    const email = body && typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    if (!email || email.length > 254 || !EMAIL_RE.test(email)) {
+      return finish({ ok: true, verifyToken: email && email.length <= 254 ? makeVerifyToken(email, null) : '' });
     }
 
-    let email;
-    try { email = JSON.parse(event.body || '{}').email?.toLowerCase().trim(); } catch { email = ''; }
-    if (!email || !email.includes('@')) {
-      return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: true, verifyToken: '' }) };
+    const decoy = () => finish({ ok: true, verifyToken: makeVerifyToken(email, null) });
+
+    if (!supaKey || !resendKey) {
+      console.error('reset-password: SUPA_SERVICE_KEY or RESEND_API_KEY not configured');
+      return decoy();
     }
 
-    // Check Supabase — does this email exist?
-    const supaHeaders = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json' };
-    const rows = await httpsGet(
-      'vtxuvmtnqlxidnswnunx.supabase.co',
-      `/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=email,name`,
-      supaHeaders
-    );
-
-    // Always return ok — never reveal whether email exists
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: true, verifyToken: '' }) };
+    // Anti email-bombing / anti-enumeration throttles (best-effort, per warm instance).
+    if (C.throttled('reset:ip:' + C.clientIp(event), 10, 15 * 60 * 1000) ||
+        C.throttled('reset:email:' + email, 3, 15 * 60 * 1000)) {
+      return decoy();
     }
 
-    const userName = rows[0].name || 'there';
+    const lookup = await httpsRequest('GET', SUPA_HOST,
+      `/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=email,name,pw_hash&limit=1`,
+      { apikey: supaKey, Authorization: `Bearer ${supaKey}`, Accept: 'application/json' });
 
-    // Generate 6-digit code
-    const code  = String(crypto.randomInt(100000, 999999));
-    const token = makeVerifyToken(email, code, secret);
+    let rows = [];
+    try { rows = JSON.parse(lookup.body); } catch { rows = []; }
+    if (lookup.status < 200 || lookup.status >= 300 || !Array.isArray(rows) || rows.length === 0) {
+      return decoy();   // never reveal whether the email exists
+    }
 
-    // Send email via Resend
-    const sendStatus = await httpsPost('api.resend.com', '/emails',
+    const user     = rows[0];
+    const userName = escapeHtml(String(user.name || 'there').slice(0, 60));
+    const code     = C.randomDigits(6);
+    const token    = makeVerifyToken(email, code, user.pw_hash);
+
+    const send = await httpsRequest('POST', 'api.resend.com', '/emails',
       { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
       {
         from: `InvestEd Pro <${fromAddr}>`,
@@ -124,16 +158,14 @@ exports.handler = async (event) => {
       }
     );
 
-    // If Resend rejected the send (bad domain, invalid key, etc.), return an error
-    if (sendStatus < 200 || sendStatus >= 300) {
-      console.error('Resend API returned status:', sendStatus);
-      return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: false, error: 'Failed to send email. Check your Resend setup.' }) };
+    if (send.status < 200 || send.status >= 300) {
+      // Logged for the owner; NOT surfaced to the client (a distinct error would reveal the account exists).
+      console.error('reset-password: Resend API returned status', send.status);
     }
-
-    return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: true, verifyToken: token }) };
+    return finish({ ok: true, verifyToken: token });
 
   } catch (err) {
-    console.error('reset-password error:', err);
-    return { statusCode: 200, headers: HEADERS_OK, body: JSON.stringify({ ok: false, error: 'Server error. Please try again.' }) };
+    console.error('reset-password: internal error', err && err.message);
+    return finish({ ok: false, error: 'Server error. Please try again.' });
   }
 };
