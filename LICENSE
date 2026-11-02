@@ -1,0 +1,86 @@
+MoneyQuest Source-Available License
+Version 1.0
+
+Copyright (c) 2026 merrickfluellen (https://github.com/merrickfluellen).
+All rights reserved except as expressly granted below.
+
+1. Definitions
+
+   "Licensor" means the copyright holder named above.
+
+   "Original Work" means all source code, markup, scripts, configuration,
+   lesson and game content, text, and data files published by the Licensor
+   in this repository, in any version.
+
+   "Derivative Work" means any software, website, app, game, service, or
+   other work that copies, modifies, adapts, translates, ports, minifies,
+   obfuscates, or otherwise incorporates any part of the Original Work.
+
+   "Commercial Use" means any use intended for or directed toward
+   commercial advantage or monetary compensation, including but not
+   limited to: selling or licensing the work; charging for access,
+   subscriptions, accounts, or features; in-app purchases; displaying
+   advertising; sponsorships; collecting fees, donations, or tips tied to
+   access; or using the work to promote or operate a paid product or
+   service.
+
+   "Copied Portion" means every part of the Original Work contained in a
+   Derivative Work, counted in lines, including parts that were modified,
+   reformatted, renamed, translated into another language, minified, or
+   obfuscated but remain substantially similar to the Original Work.
+
+   "Five Percent Threshold" is met when the Copied Portion exceeds five
+   percent (5%) of the total lines of the Original Work.
+
+2. Non-Commercial Permission
+
+   You may view, download, run, modify, and share the Original Work and
+   Derivative Works for personal, educational, and other non-commercial
+   purposes, provided that you keep this license and the copyright notice
+   above in every copy and give clear credit to the Licensor.
+
+3. Commercial Use Restriction
+
+   (a) You may NOT make Commercial Use of any Derivative Work that meets
+       the Five Percent Threshold, unless you first obtain separate written
+       permission signed by the Licensor.
+
+   (b) You may make Commercial Use of a Derivative Work that does NOT meet
+       the Five Percent Threshold, provided that you include the copyright
+       notice above and credit the Licensor.
+
+   (c) You may not avoid the Five Percent Threshold by splitting the
+       Original Work across several products, releases, or services that
+       are offered together or by the same person or organization. The
+       Copied Portions of all such works are added together.
+
+   (d) If there is a dispute about whether a Derivative Work meets the
+       Five Percent Threshold, the person making Commercial Use must prove
+       that it does not.
+
+4. Names and Branding
+
+   This license does not grant any right to use the names "MoneyQuest",
+   "InvestEd Pro", or any other name, logo, or branding of the Licensor,
+   except to give the credit required above.
+
+5. Termination
+
+   If you break any term of this license, your permissions under it end
+   automatically and immediately. You must then stop all use and
+   distribution of the Original Work and of any Derivative Work, and the
+   Licensor may pursue all remedies available under copyright and other
+   law, including damages and recovery of profits earned from the
+   unauthorized Commercial Use.
+
+6. No Warranty
+
+   THE ORIGINAL WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED. IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY
+   CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE ORIGINAL WORK OR
+   ITS USE.
+
+7. Commercial Licensing
+
+   To request permission for Commercial Use beyond what this license
+   allows, contact the Licensor through https://github.com/merrickfluellen.
