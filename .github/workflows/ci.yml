@@ -37,6 +37,9 @@ jobs:
           done < <(find deploy/netlify/functions scripts -name '*.js' -print0)
           exit $status
 
+      - name: Firewall signatures have no catastrophic backtracking (ReDoS)
+        run: node deploy/netlify/functions/lib/firewall.js selftest
+
       - name: Validate deploy/netlify.toml and .gitleaks.toml
         run: |
           python3 -c 'import tomllib; [tomllib.load(open(p,"rb")) for p in ("deploy/netlify.toml",".gitleaks.toml")]; print("TOML OK")'
