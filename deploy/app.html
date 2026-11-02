@@ -3008,6 +3008,7 @@ const apiErrorText = (r, fallback) => {
   const m = r && r.data && typeof r.data.error === 'string' && r.data.error.length <= 200 ? r.data.error : '';
   if (!r || r.status === 0) return MSG_OFFLINE;
   if (r.status === 429) return m || ('Too many tries. Please wait ' + fmtWait(r.retryAfter) + ' and try again.');
+  if (r.status === 503 && r.data && r.data.code === 'db_not_migrated') return 'Money Quest is still being set up. Please try again later.';
   if (r.status >= 500) return MSG_DOWN;
   return m || fallback;
 };
@@ -4677,8 +4678,10 @@ const handleConfirmReset = async () => {
     const json = await res.json();
     if (json.ok) { setForgotDone(true); }
     else {
-      setError(json.error || 'Something went wrong.');
-      if (json.error && (json.error.includes('expired') || json.error.includes('Invalid'))) setForgotStep(1);
+      setError(typeof json.error === 'string' && json.error.length <= 200 ? json.error : res.status >= 500 ? MSG_DOWN : 'Something went wrong.');
+      // locked out for today (too many wrong codes): this reset can't go on, so go back to the start with the message
+      if (json.error && /too many/i.test(json.error)) { setForgotStep(1); setForgotCode(''); }
+      else if (json.error && (json.error.includes('expired') || json.error.includes('Invalid'))) setForgotStep(1);
       else if (json.error && json.error.includes('code')) setForgotStep(2);
     }
   } catch { setError('Network error. Please try again.'); }
@@ -4773,7 +4776,7 @@ try {
   const pr = await Cloud.loadAll(true);
   if (!pr.ok) {
     Cloud.end(); setToken(null);
-    setError(pr.status === 0 ? MSG_OFFLINE : "You're signed in, but we couldn't load your saved progress. Please try again in a minute.");
+    setError(pr.status === 0 ? MSG_OFFLINE : pr.status === 429 ? 'Too many requests. Please wait a minute and sign in again.' : "You're signed in, but we couldn't load your saved progress. Please try again in a minute.");
     return;
   }
   applyProgressToLocal(u.email, pr.progress);
@@ -11147,9 +11150,12 @@ const deleteMyData = async () => {
   if (!u || u.practice) return;
   deleteBusy.current = true;
   Cloud.hold(true);   // no save may reach the server while (or after) the account is deleted
-  const r = await apiCall('auth-delete', { method: 'POST', body: { confirm: true }, expectUser: u.email, timeoutMs: 20000 });
+  let r = await apiCall('auth-delete', { method: 'POST', body: { confirm: true }, expectUser: u.email, timeoutMs: 20000 });
+  let retried = false;
+  if (r.status === 0) { retried = true; r = await apiCall('auth-delete', { method: 'POST', body: { confirm: true }, expectUser: u.email, timeoutMs: 20000 }); }
   deleteBusy.current = false;
-  if (r.status === 200 && r.data && r.data.ok === true) {
+  // A lost answer + a retry that says 401: the first request deleted the account (its token no longer works)
+  if ((r.status === 200 && r.data && r.data.ok === true) || (retried && r.status === 401)) {
     TabGuard.release();
     wipeAndShowAuth('Your account and data were deleted.');
     return;
