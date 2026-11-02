@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy · Money Quest by InvestEd Pro</title>
+<meta name="description" content="How Money Quest by InvestEd Pro collects, uses, shares and protects information, including our children's privacy (COPPA) notice for parents." />
+<link rel="canonical" href="https://nextgenwealthproject.netlify.app/privacy.html" />
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%23E8A317'/%3E%3Ccircle cx='32' cy='30.5' r='29.5' fill='%23FFC83D'/%3E%3Cellipse cx='32' cy='34.5' rx='19.5' ry='17' fill='%23FF9CB8'/%3E%3C/svg%3E" />
+<meta name="theme-color" content="#0E1433" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --mq-bg:#0E1433; --mq-bg-deep:#0A0F29; --mq-card:#182050; --mq-card-2:#212A63;
+  --mq-line:#323C80; --mq-text:#FFFFFF; --mq-text-2:#B4BCE6; --mq-ink:#0B1030;
+  --mq-primary:#43C463; --mq-gold:#FFC83D; --mq-info:#3BA9F5; --mq-try:#FF9F1C;
+  --mq-font:'Fredoka','Nunito',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+html { scroll-behavior:smooth; }
+body { background:var(--mq-bg); color:var(--mq-text); font-family:var(--mq-font); font-size:17px; line-height:1.6; overflow-x:hidden; -webkit-font-smoothing:antialiased; }
+body::before { content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background: radial-gradient(ellipse 80% 45% at 50% -8%, rgba(59,169,245,0.18), transparent 60%), var(--mq-bg); }
+a { color:var(--mq-info); text-underline-offset:3px; overflow-wrap:anywhere; }
+a:hover { color:var(--mq-gold); }
+:focus-visible { outline:3px solid var(--mq-gold); outline-offset:3px; border-radius:6px; }
+.wrap { max-width:860px; margin:0 auto; padding:0 16px; }
+.skip { position:absolute; left:12px; top:-60px; z-index:100; background:var(--mq-gold); color:var(--mq-ink); padding:10px 16px; border-radius:12px; font-weight:700; text-decoration:none; }
+.skip:focus { top:12px; }
+.hud { position:sticky; top:0; z-index:50; background:rgba(14,20,51,0.92); border-bottom:2px solid var(--mq-line); }
+.hud .wrap { display:flex; align-items:center; gap:12px; min-height:64px; }
+.brand { display:flex; align-items:center; gap:10px; color:var(--mq-text); text-decoration:none; font-weight:700; font-size:18px; margin-right:auto; }
+.brand svg { width:36px; height:36px; flex-shrink:0; }
+.back { color:var(--mq-text-2); text-decoration:none; font-weight:600; font-size:15px; padding:10px 4px; }
+main { padding:36px 0 56px; }
+h1 { font-size:clamp(32px, 6vw, 46px); line-height:1.1; font-weight:700; margin-bottom:10px; }
+h2 { font-size:clamp(22px, 4vw, 28px); line-height:1.2; font-weight:700; margin:40px 0 12px; color:var(--mq-gold); scroll-margin-top:80px; }
+h3 { font-size:19px; font-weight:600; margin:22px 0 8px; }
+p, li { color:var(--mq-text-2); }
+p { margin-bottom:12px; }
+strong { color:var(--mq-text); font-weight:600; }
+ul, ol { margin:0 0 14px 22px; }
+li { margin-bottom:6px; }
+.meta { color:var(--mq-text-2); font-size:15px; margin-bottom:22px; }
+.card { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:18px; padding:18px 20px; margin:18px 0; }
+.card.note { border-color:var(--mq-try); }
+.card.kids { border-color:var(--mq-primary); }
+.card h3 { margin-top:0; }
+.toc ol { columns:2 220px; column-gap:28px; margin-bottom:0; }
+.tbl { width:100%; overflow-x:auto; margin:10px 0 18px; border:2px solid var(--mq-line); border-radius:14px; }
+table { border-collapse:collapse; width:100%; font-size:15px; }
+th, td { text-align:left; vertical-align:top; padding:10px 12px; border-bottom:1px solid var(--mq-line); }
+th { background:var(--mq-card-2); color:var(--mq-text); font-weight:600; }
+td { color:var(--mq-text-2); }
+tr:last-child td { border-bottom:none; }
+@media (max-width:600px) {
+  table, thead, tbody, tr, th, td { display:block; }
+  thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+  tr { border-bottom:1px solid var(--mq-line); padding:8px 0; }
+  tr:last-child { border-bottom:none; }
+  td { border:none; padding:4px 12px; }
+  td::before { content:attr(data-label) ": "; color:var(--mq-text); font-weight:600; }
+}
+.todo { background:rgba(255,159,28,0.18); color:var(--mq-try); border:1px dashed var(--mq-try); border-radius:6px; padding:0 6px; font-weight:600; }
+footer { border-top:2px solid var(--mq-line); padding:26px 0 36px; color:var(--mq-text-2); font-size:15px; }
+footer .wrap { display:flex; flex-wrap:wrap; gap:10px 20px; justify-content:space-between; align-items:center; }
+footer ul { display:flex; flex-wrap:wrap; gap:4px 8px; list-style:none; margin:0; }
+footer li { margin:0; }
+footer a { color:var(--mq-text-2); text-decoration:none; padding:8px; display:inline-block; }
+footer a:hover { color:var(--mq-text); }
+</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to content</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mq-mark" viewBox="0 0 64 64"><circle cx="32" cy="32" r="31" fill="#E8A317"/><circle cx="32" cy="30.5" r="29.5" fill="#FFC83D"/><circle cx="32" cy="31" r="24.5" fill="none" stroke="#E8A317" stroke-width="2.5"/><path d="M14.5 28 16.5 11 29.5 19ZM49.5 28 47.5 11 34.5 19Z" fill="#F2618D"/><ellipse cx="32" cy="34.5" rx="19.5" ry="17" fill="#FF9CB8"/><circle cx="23.5" cy="29" r="3" fill="#0E1433"/><circle cx="40.5" cy="29" r="3" fill="#0E1433"/><ellipse cx="32" cy="40" rx="10" ry="7" fill="#F2618D"/><ellipse cx="28.5" cy="40" rx="2.1" ry="3" fill="#0E1433"/><ellipse cx="35.5" cy="40" rx="2.1" ry="3" fill="#0E1433"/></symbol>
+</svg>
+
+<header class="hud">
+  <div class="wrap">
+    <a class="brand" href="index.html"><svg aria-hidden="true"><use href="#mq-mark"/></svg><span>Money Quest</span></a>
+    <a class="back" href="index.html">← Home</a>
+  </div>
+</header>
+
+<main id="content">
+<div class="wrap">
+  <h1>Privacy Policy</h1>
+  <p class="meta"><strong>Effective date:</strong> November 2, 2026 · Applies to Money Quest by InvestEd Pro at nextgenwealthproject.netlify.app (the home page, the app, and its server functions).</p>
+
+  <div class="card">
+    <h3>The short version</h3>
+    <ul>
+      <li>To make an account we collect a <strong>name, email address and password</strong>. Passwords are never stored in plain text.</li>
+      <li>We save your <strong>learning and game progress</strong> so it follows you to other devices.</li>
+      <li>We do <strong>not</strong> sell personal information, show ads, or use advertising or analytics trackers.</li>
+      <li>The optional <strong>"Find my home"</strong> game feature uses a street address. We ask kids to use it only with a parent. See <a href="#home">section 5</a>.</li>
+      <li>Parents can review or delete their child's information at any time. See <a href="#children">section 8</a> and <a href="#contact">section 13</a>.</li>
+    </ul>
+  </div>
+
+  <nav class="card toc" aria-label="Contents">
+    <h3>Contents</h3>
+    <ol>
+      <li><a href="#who">Who we are</a></li>
+      <li><a href="#collect">What we collect</a></li>
+      <li><a href="#use">How we use it</a></li>
+      <li><a href="#device">What stays on your device</a></li>
+      <li><a href="#home">"Find my home" and maps</a></li>
+      <li><a href="#share">Who we share it with</a></li>
+      <li><a href="#third">Third-party services</a></li>
+      <li><a href="#children">Children's privacy (COPPA)</a></li>
+      <li><a href="#rights">Your choices and rights</a></li>
+      <li><a href="#retention">How long we keep it</a></li>
+      <li><a href="#security">Security</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact us</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="who">1. Who we are</h2>
+  <p>Money Quest by InvestEd Pro ("Money Quest", "we", "us") is a money-education game for kids and teens, made and run by Merrick Fluellen. It has two tracks: <strong>Junior Quest</strong> (designed for ages 6–11) and <strong>Pro Quest</strong> (for teens). Everything in the app is a simulation for learning. No real money is invested and no real property is bought or sold.</p>
+
+  <h2 id="collect">2. What we collect</h2>
+  <h3>Information you give us</h3>
+  <div class="tbl"><table>
+    <thead><tr><th scope="col">What</th><th scope="col">When</th><th scope="col">Where it is kept</th></tr></thead>
+    <tbody>
+      <tr><td data-label="What">Name (as typed; it can be a first name or nickname)</td><td data-label="When">Creating an account</td><td data-label="Where">Our database (Supabase) and your browser</td></tr>
+      <tr><td data-label="What">Email address</td><td data-label="When">Creating an account, signing in, resetting a password</td><td data-label="Where">Our database and your browser</td></tr>
+      <tr><td data-label="What">Password</td><td data-label="When">Creating an account or resetting a password</td><td data-label="Where">Only a one-way, salted hash is stored in our database, never the password itself</td></tr>
+      <tr><td data-label="What">Access code</td><td data-label="When">Creating an account</td><td data-label="Where">Checked by our server. A record that the code was used, with the name and email of the account, is sent to the site owner through Netlify Forms</td></tr>
+      <tr><td data-label="What">Lesson notes (free text you type)</td><td data-label="When">Using the notes feature</td><td data-label="Where">Our database and your browser</td></tr>
+      <tr><td data-label="What">A street address, and optionally bedrooms and square feet</td><td data-label="When">Only if you use "Find my home"</td><td data-label="Where">See <a href="#home">section 5</a></td></tr>
+    </tbody>
+  </table></div>
+  <p>Please do not type personal details (such as a phone number, school or home address) into lesson notes.</p>
+
+  <h3>Information created as you play</h3>
+  <p>Completed lessons, quiz results, XP, stars, stickers, trophies, settings, and your pretend portfolios (stocks, crypto, bonds, bank, loans and Money City properties). This is saved in your browser and in our database so your progress syncs across devices.</p>
+
+  <h3>Information collected automatically</h3>
+  <p>Like every website, our hosting provider (Netlify) and the services listed in <a href="#third">section 7</a> receive your <strong>IP address</strong>, browser type and the pages or files requested when your browser connects to them. Our server functions use IP addresses briefly, in memory, to limit abuse (for example, too many sign-in attempts). We do <strong>not</strong> use cookies for tracking, advertising networks, or analytics tools such as Google Analytics.</p>
+  <p>We do <strong>not</strong> ask for your birthday, phone number, photo, voice, or precise location from your device's GPS. The read-aloud feature in Junior Quest uses your device's built-in speech feature.</p>
+
+  <h2 id="use">3. How we use information</h2>
+  <ul>
+    <li>To create your account, sign you in and keep you signed in.</li>
+    <li>To save and sync your progress, notes and game state.</li>
+    <li>To send password-reset codes by email (the only emails we send).</li>
+    <li>To check access codes and keep track of which codes have been used.</li>
+    <li>To estimate pretend home values and show maps in the Money City game.</li>
+    <li>To keep the service secure, prevent abuse and fix problems.</li>
+  </ul>
+  <p>We do not use personal information for advertising, we do not build marketing profiles, and we do not sell or rent it to anyone.</p>
+
+  <h2 id="device">4. What stays on your device</h2>
+  <p>The app saves information in your browser's local storage so it works quickly and offline. This includes your signed-in session (name and email), your progress and game state, lesson notes, sound and graphics settings, and a short history of in-app activity used for troubleshooting. Some temporary items (such as sign-in attempt limits) use session storage and clear when you close the tab.</p>
+  <p>Information in local storage stays on that device until it is cleared. <strong>On a shared or school computer, sign out and clear the site's data</strong> (in your browser settings, delete site data for nextgenwealthproject.netlify.app) when you finish.</p>
+
+  <h2 id="home">5. "Find my home" and maps</h2>
+  <p>Money City has an optional Pro Quest feature called "Find my home" that estimates what a real home might be worth.</p>
+  <ul>
+    <li>When you use it, the address you type is sent to our server, which sends it to the <strong>U.S. Census Bureau Geocoder</strong> to find the location and neighborhood, and, if enabled, to <strong>RentCast</strong> for a value estimate. Our server keeps results in temporary memory for up to about an hour to avoid repeat lookups and does not log or write the address to our database.</li>
+    <li>If you only look up the home, it is not saved. <strong>If you choose to "buy" that home in the game</strong>, the property, including its street address and map coordinates, is saved with your game progress in your browser and in our database.</li>
+    <li>Map searches for cities, ZIP codes or addresses go through our server to <strong>OpenStreetMap Nominatim</strong> and the Census Geocoder. When the map is open, your browser loads map pictures from a map tile provider and asks <strong>Overpass</strong> (OpenStreetMap) servers for building data for the area on screen. These services see your IP address and the area you are viewing.</li>
+  </ul>
+  <div class="card note">
+    <p style="margin:0"><strong>Kids:</strong> please only use "Find my home" with a parent or guardian. <strong>Parents:</strong> you can ask us to delete a saved home address at any time (see <a href="#contact">section 13</a>). We are working on changing this feature so it never saves an exact address.</p>
+  </div>
+
+  <h2 id="share">6. Who we share information with</h2>
+  <p>We share personal information only with the service providers that run Money Quest for us (listed below), only as needed to provide the service, and when the law requires it (for example, a valid court order) or to protect the safety of our users. If Money Quest were ever transferred to a new owner, this policy would continue to apply to information collected under it, and we would notify users first.</p>
+  <p>The site owner can see the list of accounts (name, email, account type and sign-up date) to manage access codes and support.</p>
+
+  <h2 id="third">7. Third-party services</h2>
+  <p>Each of these services has its own privacy policy. None of them receive your password.</p>
+  <div class="tbl"><table>
+    <thead><tr><th scope="col">Service</th><th scope="col">What it does</th><th scope="col">What it receives</th></tr></thead>
+    <tbody>
+      <tr><td data-label="Service">Netlify</td><td data-label="Does">Hosts the website and runs our server functions; Netlify Forms stores access-code use records</td><td data-label="Receives">IP address and request details; name, email and access code at sign-up (Forms)</td></tr>
+      <tr><td data-label="Service">Supabase</td><td data-label="Does">Our database</td><td data-label="Receives">Account details (name, email, password hash) and saved progress, notes and game state</td></tr>
+      <tr><td data-label="Service">Resend</td><td data-label="Does">Sends password-reset emails</td><td data-label="Receives">Your email address and the reset code</td></tr>
+      <tr><td data-label="Service">Stripe</td><td data-label="Does">Handles subscription payments on Stripe's own checkout page</td><td data-label="Receives">Whatever you enter on Stripe's page. Payment card details go to Stripe, never to us</td></tr>
+      <tr><td data-label="Service">Google Fonts</td><td data-label="Does">Provides the fonts on our pages</td><td data-label="Receives">IP address and browser details</td></tr>
+      <tr><td data-label="Service">unpkg, jsDelivr and the Tailwind CSS CDN</td><td data-label="Does">Deliver the code libraries the app uses (React, Leaflet maps, three.js, Supabase, styles)</td><td data-label="Receives">IP address and browser details</td></tr>
+      <tr><td data-label="Service">OpenStreetMap tiles, MapTiler or Stadia Maps</td><td data-label="Does">Map pictures in Money City</td><td data-label="Receives">IP address and the map area you view</td></tr>
+      <tr><td data-label="Service">Overpass API servers (overpass-api.de, overpass.private.coffee, overpass.kumi.systems)</td><td data-label="Does">Building data for the map</td><td data-label="Receives">The map area you view; your IP address when your browser asks directly</td></tr>
+      <tr><td data-label="Service">OpenStreetMap Nominatim</td><td data-label="Does">Place and ZIP-code search</td><td data-label="Receives">The search text, sent by our server (not your IP)</td></tr>
+      <tr><td data-label="Service">U.S. Census Bureau Geocoder</td><td data-label="Does">Finds addresses and neighborhoods</td><td data-label="Receives">The address or search text, sent by our server</td></tr>
+      <tr><td data-label="Service">RentCast (only if enabled)</td><td data-label="Does">Home value estimates and sample listings</td><td data-label="Receives">The matched address or map area, sent by our server</td></tr>
+      <tr><td data-label="Service">Yahoo Finance and CoinGecko</td><td data-label="Does">Market prices for the simulators</td><td data-label="Receives">Only ticker symbols, requested by our server. No personal information</td></tr>
+      <tr><td data-label="Service">Google Forms</td><td data-label="Does">The optional "Feedback" button opens a Google Form</td><td data-label="Receives">Only what you choose to type into the form</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 id="children">8. Children's privacy (COPPA notice for parents)</h2>
+  <div class="card kids">
+    <p>Money Quest is built for young learners, including children under 13, so we follow the U.S. Children's Online Privacy Protection Act (COPPA) principles below. This section is our notice to parents.</p>
+  </div>
+  <h3>What we collect from children and why</h3>
+  <p>The same information described in <a href="#collect">section 2</a>: a name, an email address and password to make an account, progress and game data, any lesson notes the child types, and (only if used) a home address for "Find my home". We use it only to run the learning game for the child, as described in <a href="#use">section 3</a>. We do not require a child to give more information than is reasonably needed to take part, and children cannot post information publicly or chat with other users in Money Quest.</p>
+  <h3>Parental consent</h3>
+  <p>A child under 13 should not create an account or use Money Quest without a parent's or guardian's permission. Accounts are created with a purchased access code, and we expect a parent, guardian or teacher to set up and manage accounts for children under 13. A school may consent on behalf of parents when Money Quest is used only for classroom learning.</p>
+  <p>Our sign-up does not yet ask for age. We are adding an age check and a parental-consent step. If we learn that we collected personal information from a child under 13 without a parent's consent, we will delete it.</p>
+  <h3>Parents' rights</h3>
+  <p>A parent or guardian of a child under 13 can, at any time:</p>
+  <ul>
+    <li><strong>Review</strong> the personal information we hold about their child.</li>
+    <li><strong>Correct</strong> it, or ask us to correct it.</li>
+    <li><strong>Delete</strong> it, including the account, progress, notes and any saved home address.</li>
+    <li><strong>Revoke consent</strong> and stop any further collection or use of their child's information. This closes the child's account, because the game cannot save progress without it.</li>
+  </ul>
+  <p>To make a request, contact us as described in <a href="#contact">section 13</a>. Tell us the child's account email. To protect the child, we will take reasonable steps to confirm that you are the parent or guardian before we share or change anything. We will respond within 30 days, usually much sooner. We will also remove the child's information from the access-code records we keep in Netlify Forms.</p>
+
+  <h2 id="rights">9. Your choices and rights</h2>
+  <ul>
+    <li><strong>Access, correct or delete:</strong> anyone (not only parents) can ask us for a copy of their information, to fix it, or to delete their account and data. Contact us (section 13).</li>
+    <li><strong>Local data:</strong> you can clear the information saved in your browser at any time from your browser's settings.</li>
+    <li><strong>Optional features:</strong> you do not have to use "Find my home", lesson notes or the feedback form.</li>
+    <li>Depending on where you live (for example, California or the European Economic Area), you may have additional rights. Contact us and we will honor them as the law requires.</li>
+  </ul>
+
+  <h2 id="retention">10. How long we keep information</h2>
+  <ul>
+    <li><strong>Account, progress and notes:</strong> while the account exists. When an account is deleted, we delete its data from our database within 30 days. Copies in a hosting provider's routine backups may take up to an additional 30 days to expire.</li>
+    <li><strong>Access-code use records</strong> (Netlify Forms): kept to prevent a code from being reused and deleted on request.</li>
+    <li><strong>Password-reset codes:</strong> expire after 15 minutes and are not stored in our database.</li>
+    <li><strong>Sign-in sessions:</strong> expire after 30 days of not being renewed.</li>
+    <li><strong>"Find my home" lookups:</strong> kept only in temporary server memory (up to about an hour), unless you save the home by buying it in the game.</li>
+    <li><strong>Server and hosting logs:</strong> kept by Netlify for a limited time under its own policies.</li>
+    <li><strong>Browser storage:</strong> stays on your device until you clear it.</li>
+  </ul>
+  <p>We do not keep children's personal information longer than needed to provide the service.</p>
+
+  <h2 id="security">11. Security</h2>
+  <p>We take reasonable steps to protect information, including:</p>
+  <ul>
+    <li><strong>Encrypted connections:</strong> the whole site is served only over HTTPS, and HTTP Strict Transport Security (HSTS) tells browsers never to connect without encryption.</li>
+    <li><strong>Hashed passwords:</strong> passwords are stored only as one-way hashes, never in plain text. We use salted scrypt hashing for new and updated passwords and upgrade older accounts' hashes when they sign in.</li>
+    <li><strong>Encrypted reset tokens:</strong> password-reset verification tokens are encrypted and authenticated with AES-256-GCM and expire after 15 minutes.</li>
+    <li><strong>Abuse limits:</strong> sign-in, sign-up and password-reset requests are rate-limited.</li>
+    <li><strong>Secrets on the server:</strong> service keys and admin credentials are kept in server settings, not in the web page.</li>
+  </ul>
+  <p>No system is perfectly secure. If we learn of a security incident that affects your information, we will notify affected users (and parents, for children's accounts) as the law requires. To report a security problem, see the SECURITY policy on our <a href="https://github.com/merrickfluellen/Next-Gen-Wealth-Project" rel="noopener">GitHub repository</a>.</p>
+
+  <h2 id="changes">12. Changes to this policy</h2>
+  <p>If we change this policy, we will update the effective date at the top. If a change affects how we collect or use children's information in a significant way, we will notify parents and ask for consent again where COPPA requires it before the change applies to their child.</p>
+
+  <h2 id="contact">13. Contact us</h2>
+  <div class="card">
+    <p><strong>Operator:</strong> Merrick Fluellen, Money Quest by InvestEd Pro</p>
+    <!-- TODO (owner): confirm this is the address you want for privacy and parental requests, or replace it with a dedicated privacy inbox. -->
+    <p><strong>Email (privacy and parent requests):</strong> <a href="mailto:merrick.fluellen@gmail.com?subject=Privacy%20request">merrick.fluellen@gmail.com</a></p>
+    <!-- TODO (owner): COPPA direct notice requires the operator's mailing address. Replace the placeholder below. -->
+    <p><strong>Mailing address:</strong> <span class="todo">TODO: owner to add a mailing address</span></p>
+    <p><strong>GitHub:</strong> <a href="https://github.com/merrickfluellen" rel="noopener">@merrickfluellen</a>. Please use GitHub only for general questions. GitHub issues are public, so do not post personal information or a child's details there; email us instead.</p>
+  </div>
+  <p>See also our <a href="terms.html">Terms of Use</a>.</p>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Money Quest by InvestEd Pro · Merrick Fluellen</span>
+    <nav aria-label="Footer"><ul><li><a href="index.html">Home</a></li><li><a href="app.html">Open the app</a></li><li><a href="privacy.html" aria-current="page">Privacy</a></li><li><a href="terms.html">Terms</a></li></ul></nav>
+  </div>
+</footer>
+</body>
+</html>
