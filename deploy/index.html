@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<!-- ── Primary SEO ── -->
+<title>Money Quest by InvestEd Pro — Money Lessons Game for Kids & Teens</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%23E8A317'/%3E%3Ccircle cx='32' cy='30.5' r='29.5' fill='%23FFC83D'/%3E%3Ccircle cx='32' cy='31' r='24.5' fill='none' stroke='%23E8A317' stroke-width='2.5'/%3E%3Cpath d='M14.5 28 16.5 11 29.5 19ZM49.5 28 47.5 11 34.5 19Z' fill='%23F2618D'/%3E%3Cellipse cx='32' cy='34.5' rx='19.5' ry='17' fill='%23FF9CB8'/%3E%3Ccircle cx='23.5' cy='29' r='3' fill='%230E1433'/%3E%3Ccircle cx='40.5' cy='29' r='3' fill='%230E1433'/%3E%3Cellipse cx='32' cy='40' rx='10' ry='7' fill='%23F2618D'/%3E%3Cellipse cx='28.5' cy='40' rx='2.1' ry='3' fill='%230E1433'/%3E%3Cellipse cx='35.5' cy='40' rx='2.1' ry='3' fill='%230E1433'/%3E%3Cpath d='m32 2.2 2.2 4.4 4.9.7-3.5 3.4.8 4.8-4.4-2.3-4.4 2.3.8-4.8-3.5-3.4 4.9-.7z' fill='%23fff' stroke='%23E8A317' stroke-width='1.2' stroke-linejoin='round'/%3E%3C/svg%3E">
+<meta name="description" content="Money Quest by InvestEd Pro is a game-style money learning app for kids and teens. Junior Quest (ages 6–11) teaches saving, spending and earning; Pro Quest covers the Missouri DESE Personal Finance course. Earn XP, stars and stickers, then invest sim cash in Money City." />
+<meta name="keywords" content="money game for kids, financial literacy for kids, personal finance app for teens, teen investing app, high school personal finance, elementary money lessons, stock market simulator for students, financial education app, Missouri DESE personal finance, investing for beginners, teen money management, financial literacy app, stock market for high schoolers" />
+<meta name="author" content="Merrick Fluellen" />
+<link rel="canonical" href="https://nextgenwealthproject.netlify.app/" />
+
+<!-- ── Open Graph (Facebook, LinkedIn, iMessage previews) ── -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Money Quest by InvestEd Pro" />
+<meta property="og:url" content="https://nextgenwealthproject.netlify.app/" />
+<meta property="og:title" content="Money Quest by InvestEd Pro — Money Lessons Game for Kids & Teens" />
+<meta property="og:description" content="Bite-size money lessons in a game kids and teens actually want to play. Two tracks — Junior Quest (ages 6–11) and Pro Quest (teens) — plus Money City, a stocks, crypto, real estate and bonds simulator. Free to start." />
+<meta property="og:image" content="https://nextgenwealthproject.netlify.app/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+
+<!-- ── Twitter / X Card ── -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Money Quest by InvestEd Pro — Money Lessons Game for Kids & Teens" />
+<meta name="twitter:description" content="A money learning game for kids and teens: XP, stars, stickers and a Money City investing simulator. Pro track aligned to Missouri DESE Personal Finance. Free to start." />
+<meta name="twitter:image" content="https://nextgenwealthproject.netlify.app/og-image.png" />
+
+<!-- ── JSON-LD Structured Data (Google Rich Results) ── -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Money Quest by InvestEd Pro",
+  "applicationCategory": "EducationalApplication",
+  "operatingSystem": "Web",
+  "url": "https://nextgenwealthproject.netlify.app/",
+  "description": "A game-style money learning app for kids and teens. Junior Quest (ages 6-11) teaches saving, spending, earning and giving; Pro Quest covers the Missouri DESE Personal Finance graduation-requirement course. Lessons earn sim cash to invest in Money City, a stocks, crypto, real estate and bonds simulator.",
+  "screenshot": "https://nextgenwealthproject.netlify.app/og-image.png",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD",
+    "description": "Free to start"
+  },
+  "audience": {
+    "@type": "EducationalAudience",
+    "educationalRole": "student",
+    "audienceType": "Elementary, middle and high school students, families and teachers"
+  },
+  "educationalAlignment": {
+    "@type": "AlignmentObject",
+    "alignmentType": "educationalSubject",
+    "targetName": "Missouri DESE Personal Finance"
+  },
+  "featureList": [
+    "Junior Quest track for ages 6-11 with read-aloud lessons",
+    "Pro Quest track covering Missouri DESE Personal Finance",
+    "XP, levels, stars, streaks and a sticker collection",
+    "Fix-It mistake review after every quiz",
+    "Live stock market simulator",
+    "Crypto trading simulator",
+    "Real estate investment simulator",
+    "Bond portfolio simulator",
+    "Interactive personal finance lessons",
+    "Quizzes and progress tracking",
+    "Real Estate License exam",
+    "FirstCity Bank loan simulator"
+  ],
+  "creator": {
+    "@type": "Person",
+    "name": "Merrick Fluellen"
+  }
+}
+</script>
+<meta name="theme-color" content="#0E1433" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ── Money Quest brand tokens (same as the app) ── */
+:root {
+  --mq-bg:#0E1433; --mq-bg-deep:#0A0F29; --mq-card:#182050; --mq-card-2:#212A63;
+  --mq-line:#323C80; --mq-line-strong:#6B78C4;
+  --mq-text:#FFFFFF; --mq-text-2:#B4BCE6; --mq-ink:#0B1030;
+  --mq-primary:#43C463; --mq-primary-dark:#2E9A48;
+  --mq-gold:#FFC83D; --mq-gold-dark:#E8A317;
+  --mq-info:#3BA9F5; --mq-info-dark:#1F86CF;
+  --mq-try:#FF9F1C; --mq-try-dark:#D9800F;
+  --mq-level:#B69CFF; --mq-pig:#FF9CB8;
+  --mq-ok-bg:#163A22; --mq-ok-head:#7FE08F; --mq-ok-text:#E8FFE0;
+  --mq-try-bg:#3A2A12; --mq-try-head:#FFC266; --mq-try-text:#F4F6FF;
+  --mq-w-amber:#A15C07; --mq-w-green:#1A7D44; --mq-w-blue:#1D5FC4;
+  --mq-w-purple:#7048D6; --mq-w-teal:#0E7C86; --mq-w-berry:#BE185D;
+  --mq-font:'Fredoka','Nunito',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --radius:22px;
+}
+
+html { scroll-behavior:smooth; }
+body { background:var(--mq-bg); color:var(--mq-text); font-family:var(--mq-font); font-size:17px; line-height:1.5; overflow-x:hidden; -webkit-font-smoothing:antialiased; }
+a { color:inherit; }
+img, svg { display:block; }
+.wrap { max-width:1140px; margin:0 auto; padding:0 20px; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.skip { position:absolute; left:12px; top:-60px; z-index:100; background:var(--mq-gold); color:var(--mq-ink); padding:10px 16px; border-radius:12px; font-weight:700; text-decoration:none; }
+.skip:focus { top:12px; }
+:focus-visible { outline:3px solid var(--mq-gold); outline-offset:3px; border-radius:10px; }
+
+/* Starry quest background */
+body::before { content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(ellipse 80% 45% at 50% -8%, rgba(59,169,245,0.22), transparent 60%),
+    radial-gradient(circle at 12% 30%, rgba(255,200,61,0.07), transparent 30%),
+    radial-gradient(circle at 88% 70%, rgba(67,196,99,0.07), transparent 30%),
+    var(--mq-bg); }
+
+/* ── Buttons (3D "press" like the game) ── */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:52px; padding:12px 24px; border-radius:16px; border:none; font:700 18px var(--mq-font); text-decoration:none; cursor:pointer; transition:transform .08s, box-shadow .08s, filter .15s; }
+.btn:active { transform:translateY(4px); }
+.btn-go { background:var(--mq-primary); color:var(--mq-ink); box-shadow:0 5px 0 var(--mq-primary-dark); }
+.btn-go:active { box-shadow:0 1px 0 var(--mq-primary-dark); }
+.btn-gold { background:var(--mq-gold); color:var(--mq-ink); box-shadow:0 5px 0 var(--mq-gold-dark); }
+.btn-gold:active { box-shadow:0 1px 0 var(--mq-gold-dark); }
+.btn-ghost { background:var(--mq-card-2); color:var(--mq-text); border:2px solid var(--mq-line); box-shadow:0 5px 0 var(--mq-bg-deep); }
+.btn:hover { filter:brightness(1.07); }
+.btn-sm { min-height:44px; padding:8px 16px; font-size:16px; border-radius:14px; }
+
+/* ── Top bar (game HUD) ── */
+.hud { position:sticky; top:0; z-index:50; background:rgba(14,20,51,0.9); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:2px solid var(--mq-line); }
+.hud .wrap { display:flex; align-items:center; gap:14px; min-height:68px; }
+.brand { display:flex; align-items:center; gap:10px; text-decoration:none; margin-right:auto; }
+.brand svg { width:42px; height:42px; }
+.brand-name { font-weight:700; font-size:22px; line-height:1; }
+.brand-name .q { color:var(--mq-gold); }
+.brand-by { display:block; font-weight:500; font-size:12px; color:var(--mq-text-2); margin-top:3px; }
+.hud-links { display:flex; gap:4px; list-style:none; }
+.hud-links a { display:block; padding:10px 12px; border-radius:12px; text-decoration:none; font-weight:600; color:var(--mq-text-2); }
+.hud-links a:hover { color:var(--mq-text); background:var(--mq-card); }
+.hud-signin { font-weight:600; color:var(--mq-text); text-decoration:none; padding:10px 12px; border-radius:12px; }
+.hud-signin:hover { background:var(--mq-card); }
+@media (max-width:900px) { .hud-links { display:none; } }
+@media (max-width:420px) { .brand-by { display:none; } .hud-signin { display:none; } .brand-name { font-size:20px; } }
+
+/* ── Hero ── */
+.hero { padding:56px 0 40px; }
+.hero .wrap { display:grid; grid-template-columns:1.05fr 0.95fr; gap:40px; align-items:center; }
+.chip { display:inline-flex; align-items:center; gap:8px; padding:6px 14px 6px 6px; border-radius:99px; background:var(--mq-card); border:2px solid var(--mq-line); font-weight:600; font-size:15px; color:var(--mq-text-2); }
+.chip b { background:var(--mq-pig); color:var(--mq-ink); border-radius:99px; padding:2px 10px; font-weight:700; }
+h1 { font-size:clamp(40px, 6.2vw, 68px); line-height:1.02; font-weight:700; margin:18px 0 16px; }
+h1 .gold { color:var(--mq-gold); }
+h1 .green { color:var(--mq-primary); }
+.lead { font-size:clamp(18px, 2vw, 20px); color:var(--mq-text-2); max-width:540px; }
+.lead strong { color:var(--mq-text); font-weight:600; }
+.cta-row { display:flex; flex-wrap:wrap; gap:14px; margin-top:28px; }
+.hero-note { margin-top:18px; font-size:15px; color:var(--mq-text-2); display:flex; flex-wrap:wrap; gap:6px 16px; }
+.hero-note span::before { content:'✓ '; color:var(--mq-primary); font-weight:700; }
+
+/* Phone mockup with the quest map */
+.phone-stage { position:relative; display:flex; justify-content:center; }
+.phone { position:relative; width:300px; height:600px; border-radius:44px; background:var(--mq-bg-deep); border:10px solid #1B2254; box-shadow:0 30px 80px rgba(0,0,0,0.55), 0 0 0 2px var(--mq-line); overflow:hidden; }
+.phone::before { content:''; position:absolute; top:8px; left:50%; transform:translateX(-50%); width:90px; height:22px; background:#1B2254; border-radius:99px; z-index:3; }
+.p-hud { display:flex; gap:6px; justify-content:center; padding:40px 10px 10px; border-bottom:2px solid var(--mq-line); background:var(--mq-bg); }
+.p-stat { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:10px; padding:3px 8px; font-weight:700; font-size:14px; }
+.p-world { margin:12px 12px 0; border-radius:14px; padding:10px 12px; background:var(--mq-w-amber); font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px; box-shadow:0 4px 0 rgba(0,0,0,0.3); }
+.p-world small { display:block; font-weight:500; font-size:11px; opacity:0.95; }
+.p-path { position:relative; display:flex; flex-direction:column; align-items:center; gap:18px; padding:26px 0; }
+.p-node { width:62px; height:58px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:26px; box-shadow:0 6px 0 rgba(0,0,0,0.35); }
+.p-node.done { background:linear-gradient(180deg,#FFD84D,var(--mq-gold-dark)); }
+.p-node.next { background:var(--mq-w-amber); animation:pulse 1.6s ease-in-out infinite; position:relative; }
+.p-node.next::after { content:'START'; position:absolute; top:-30px; left:50%; translate:-50% 0; background:#fff; color:var(--mq-primary-dark); font-weight:700; font-size:12px; padding:2px 10px; border-radius:8px; animation:bob 1.2s ease-in-out infinite; }
+.p-node.lock { background:var(--mq-card-2); font-size:20px; }
+.p-node:nth-child(2) { transform:translateX(46px); } .p-node:nth-child(4) { transform:translateX(-46px); }
+.p-nav { position:absolute; bottom:0; left:0; right:0; display:flex; justify-content:space-around; padding:10px 6px 14px; background:var(--mq-bg); border-top:2px solid var(--mq-line); font-size:22px; }
+.p-nav span { padding:4px 10px; border-radius:10px; }
+.p-nav span.on { background:rgba(59,169,245,0.18); outline:2px solid var(--mq-info); }
+.float { position:absolute; z-index:4; background:var(--mq-card); border:2px solid var(--mq-line); border-radius:16px; padding:10px 14px; font-weight:700; font-size:16px; box-shadow:0 12px 30px rgba(0,0,0,0.4); animation:bob 3s ease-in-out infinite; white-space:nowrap; }
+.float small { display:block; font-weight:500; font-size:12px; color:var(--mq-text-2); }
+.f1 { top:70px; left:-6px; animation-delay:.2s; }
+.f2 { top:250px; right:-14px; animation-delay:.9s; border-color:var(--mq-gold); }
+.f3 { bottom:90px; left:-18px; animation-delay:1.5s; border-color:var(--mq-primary); }
+.penny-bubble { position:absolute; bottom:-34px; right:-24px; z-index:4; display:flex; align-items:flex-end; gap:6px; }
+.penny-bubble svg { width:64px; height:64px; filter:drop-shadow(0 6px 0 rgba(0,0,0,0.3)); }
+.penny-bubble .bub { background:#fff; color:var(--mq-ink); font-weight:600; font-size:15px; padding:8px 12px; border-radius:14px 14px 4px 14px; margin-bottom:40px; }
+@media (max-width:900px) {
+  .hero .wrap { grid-template-columns:1fr; }
+  .phone-stage { margin-top:10px; }
+}
+@media (max-width:420px) { .f1 { left:0; } .f2 { right:0; } .f3 { left:0; } .penny-bubble { right:0; } .f1, .f3 { display:none; } .f2 { top:auto; bottom:150px; } .phone { width:270px; height:560px; } }
+
+/* ── Stat strip (HUD-style) ── */
+.strip { padding:10px 0 30px; }
+.strip ul { list-style:none; display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.strip li { background:var(--mq-card); border:2px solid var(--mq-line); border-bottom-width:5px; border-radius:18px; padding:14px 10px; text-align:center; }
+.strip b { display:block; font-size:32px; line-height:1.1; color:var(--mq-gold); }
+.strip span { font-size:15px; color:var(--mq-text-2); font-weight:500; }
+@media (max-width:640px) { .strip ul { grid-template-columns:repeat(2,1fr); } }
+
+/* ── Section scaffolding: each section is a "level" on the map ── */
+section { padding:72px 0; position:relative; }
+.level-tag { display:inline-flex; align-items:center; gap:10px; font-weight:700; font-size:15px; color:var(--mq-text-2); margin-bottom:10px; }
+.level-tag i { font-style:normal; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:var(--mq-gold); color:var(--mq-ink); box-shadow:0 4px 0 var(--mq-gold-dark); font-size:17px; }
+h2 { font-size:clamp(32px, 4.4vw, 48px); line-height:1.08; font-weight:700; margin-bottom:14px; }
+h2 .gold { color:var(--mq-gold); } h2 .green { color:var(--mq-primary); }
+.sec-lead { color:var(--mq-text-2); font-size:19px; max-width:640px; }
+.center { text-align:center; } .center .sec-lead { margin:0 auto; }
+/* dotted path connector between levels */
+.trail { height:70px; width:6px; margin:0 auto; background:repeating-linear-gradient(to bottom, var(--mq-line) 0 10px, transparent 10px 20px); border-radius:6px; }
+
+/* ── Playable demo ── */
+.demo { max-width:620px; margin:30px auto 0; background:var(--mq-card); border:2px solid var(--mq-line); border-bottom-width:6px; border-radius:28px; padding:20px; position:relative; overflow:hidden; }
+.demo-top { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.demo-tabs { display:flex; gap:6px; margin-bottom:14px; }
+.demo-tab { flex:1; min-height:44px; border-radius:14px; border:2px solid var(--mq-line); background:var(--mq-card-2); color:var(--mq-text-2); font:600 16px var(--mq-font); cursor:pointer; }
+.demo-tab[aria-pressed="true"] { border-color:var(--mq-info); background:rgba(59,169,245,0.16); color:var(--mq-text); }
+.bar { flex:1; height:16px; background:var(--mq-line); border-radius:99px; overflow:hidden; }
+.bar i { display:block; height:100%; width:0; background:var(--mq-primary); border-radius:99px; transition:width .4s ease; box-shadow:inset 0 -3px 0 rgba(0,0,0,0.15); }
+.xp { font-weight:700; min-width:64px; text-align:right; color:var(--mq-gold); }
+.q-tag { display:inline-block; padding:4px 12px; border-radius:99px; font-weight:700; font-size:14px; background:var(--mq-w-blue); margin-bottom:10px; }
+.q-tag.fix { background:var(--mq-try); color:var(--mq-ink); }
+.q-text { font-size:clamp(21px, 3vw, 25px); font-weight:700; line-height:1.3; margin-bottom:14px; }
+.opts { display:grid; gap:10px; }
+.opt { display:flex; align-items:center; gap:10px; width:100%; min-height:58px; padding:12px 16px; text-align:left; border-radius:16px; border:2px solid var(--mq-line); border-bottom-width:5px; background:var(--mq-bg); color:var(--mq-text); font:600 18px var(--mq-font); cursor:pointer; }
+.opt:hover:not(:disabled) { border-color:var(--mq-line-strong); }
+.opt[aria-pressed="true"] { border-color:var(--mq-info); background:rgba(59,169,245,0.16); }
+.opt.right { border-color:var(--mq-primary); background:rgba(67,196,99,0.18); }
+.opt.wrong { border-color:var(--mq-try); background:rgba(255,159,28,0.18); }
+.opt .mark { margin-left:auto; font-size:20px; }
+.opt:disabled { cursor:default; }
+.demo .btn { width:100%; margin-top:16px; }
+.btn:disabled { background:var(--mq-card-2); color:var(--mq-text-2); box-shadow:0 5px 0 var(--mq-bg-deep); cursor:not-allowed; filter:none; }
+.fb { margin-top:16px; border-radius:18px; padding:14px 16px; border-top:3px solid; animation:pop .25s ease both; }
+.fb.ok { background:var(--mq-ok-bg); border-color:var(--mq-primary); }
+.fb.no { background:var(--mq-try-bg); border-color:var(--mq-try); }
+.fb h3 { font-size:21px; }
+.fb.ok h3 { color:var(--mq-ok-head); } .fb.no h3 { color:var(--mq-try-head); }
+.fb p { margin-top:4px; color:var(--mq-ok-text); }
+.fb.no p { color:var(--mq-try-text); }
+.fb .btn-go { margin-top:12px; }
+.fb.no .btn-go { background:var(--mq-try); box-shadow:0 5px 0 var(--mq-try-dark); }
+.done { text-align:center; padding:6px 0; }
+.stars { font-size:52px; letter-spacing:4px; }
+.stars span { display:inline-block; animation:star .5s cubic-bezier(.34,1.56,.64,1) both; }
+.stars span.off { filter:grayscale(1) brightness(.45); }
+.gift { font-size:84px; background:none; border:none; cursor:pointer; animation:bob 1.3s ease-in-out infinite; line-height:1.1; border-radius:20px; }
+.gift.shake { animation:shake .3s ease infinite; }
+.prize { font-size:84px; animation:star .6s cubic-bezier(.34,1.56,.64,1) both; }
+.confetti { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+.confetti i { position:absolute; top:-14px; width:10px; height:14px; border-radius:3px; animation:fall 2s ease-in forwards; }
+
+/* ── Tracks: character select ── */
+.tracks-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:34px; }
+.track { background:var(--mq-card); border:2px solid var(--mq-line); border-bottom-width:7px; border-radius:28px; padding:26px; position:relative; }
+.track.jr { border-color:var(--mq-primary); } .track.pro { border-color:var(--mq-info); }
+.track-head { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
+.track-avatar { width:72px; height:72px; border-radius:22px; display:flex; align-items:center; justify-content:center; font-size:42px; flex-shrink:0; }
+.jr .track-avatar { background:rgba(67,196,99,0.18); } .pro .track-avatar { background:rgba(59,169,245,0.18); }
+.track h3 { font-size:28px; line-height:1.1; }
+.track .age { font-size:15px; font-weight:600; color:var(--mq-text-2); }
+.track p { color:var(--mq-text-2); }
+.worlds { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; list-style:none; }
+.worlds li { padding:7px 12px; border-radius:12px; font-weight:600; font-size:15px; color:#fff; box-shadow:0 3px 0 rgba(0,0,0,0.3); }
+.perks { list-style:none; display:grid; gap:8px; }
+.perks li { display:flex; gap:10px; align-items:flex-start; }
+.perks li::before { content:'★'; color:var(--mq-gold); font-size:18px; line-height:1.4; }
+.track .btn { margin-top:20px; width:100%; }
+.btn-info { background:var(--mq-info); color:var(--mq-ink); box-shadow:0 5px 0 var(--mq-info-dark); }
+@media (max-width:820px) { .tracks-grid { grid-template-columns:1fr; } }
+
+/* ── Game loop: a winding path of 4 nodes ── */
+.loop { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:40px; position:relative; }
+.loop::before { content:''; position:absolute; top:44px; left:12%; right:12%; height:6px; background:repeating-linear-gradient(90deg, var(--mq-line) 0 12px, transparent 12px 24px); }
+.step { text-align:center; position:relative; }
+.step:nth-child(even) { margin-top:40px; }
+.step-node { width:88px; height:84px; margin:0 auto 14px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:38px; position:relative; box-shadow:0 7px 0 rgba(0,0,0,0.35), inset 0 -4px 0 rgba(0,0,0,0.15); }
+.step h3 { font-size:22px; }
+.step p { color:var(--mq-text-2); font-size:16px; max-width:230px; margin:4px auto 0; }
+.step small { display:block; font-weight:700; font-size:13px; color:var(--mq-text-2); text-transform:uppercase; letter-spacing:.06em; margin-bottom:2px; }
+.rewards { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-top:44px; list-style:none; }
+.rewards li { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:99px; padding:8px 16px; font-weight:600; font-size:16px; }
+@media (max-width:760px) {
+  .loop { grid-template-columns:1fr 1fr; row-gap:28px; } .loop::before { display:none; } .step:nth-child(even) { margin-top:0; }
+}
+
+/* ── Money City ── */
+.city { display:grid; grid-template-columns:0.9fr 1.1fr; gap:36px; align-items:center; }
+.flow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:22px 0; }
+.flow span { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:14px; padding:10px 14px; font-weight:700; }
+.flow .arrow { background:none; border:none; padding:0; color:var(--mq-gold); font-size:22px; }
+.flow .cash { border-color:var(--mq-info); color:var(--mq-info); }
+.skyline { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; align-items:end; }
+.bldg { border-radius:20px 20px 10px 10px; padding:16px 14px; border:2px solid rgba(255,255,255,0.12); border-bottom-width:6px; border-bottom-color:rgba(0,0,0,0.35); box-shadow:0 14px 30px rgba(0,0,0,0.35); position:relative; overflow:hidden; }
+.bldg::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(90deg, transparent 0 18px, rgba(255,255,255,0.05) 18px 22px); pointer-events:none; }
+.bldg .ico { font-size:34px; }
+.bldg h3 { font-size:20px; margin-top:4px; }
+.bldg p { font-size:15px; opacity:.95; margin-top:4px; }
+.bldg.tall { min-height:250px; } .bldg.mid { min-height:210px; } .bldg.low { min-height:180px; }
+.b1 { background:var(--mq-w-blue); } .b2 { background:var(--mq-w-purple); } .b3 { background:var(--mq-w-green); }
+.b4 { background:var(--mq-w-teal); } .b5 { background:var(--mq-w-amber); } .b6 { background:var(--mq-w-berry); }
+.city-note { margin-top:16px; font-size:15px; color:var(--mq-text-2); }
+@media (max-width:900px) { .city { grid-template-columns:1fr; } }
+@media (max-width:520px) { .skyline { grid-template-columns:1fr 1fr; } .bldg.tall, .bldg.mid, .bldg.low { min-height:0; } }
+
+/* ── Grown-ups ── */
+.safe-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:32px; }
+.safe { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:22px; padding:20px; }
+.safe .ico { width:52px; height:52px; border-radius:16px; background:rgba(67,196,99,0.16); display:flex; align-items:center; justify-content:center; font-size:26px; margin-bottom:10px; }
+.safe h3 { font-size:20px; }
+.safe p { color:var(--mq-text-2); font-size:16px; margin-top:4px; }
+.dese { margin-top:22px; display:flex; gap:20px; align-items:center; background:linear-gradient(135deg, rgba(59,169,245,0.14), rgba(67,196,99,0.1)); border:2px solid var(--mq-info); border-radius:26px; padding:24px; }
+.dese .badge { flex-shrink:0; width:86px; height:86px; border-radius:24px; background:var(--mq-info); color:var(--mq-ink); display:flex; align-items:center; justify-content:center; font-size:44px; box-shadow:0 6px 0 var(--mq-info-dark); }
+.dese h3 { font-size:23px; }
+.dese p { color:var(--mq-text-2); margin-top:4px; }
+.pills { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; list-style:none; }
+.pills li { background:var(--mq-bg); border:2px solid var(--mq-line); border-radius:99px; padding:4px 12px; font-size:14px; font-weight:600; }
+.pretend { margin-top:16px; text-align:center; color:var(--mq-text-2); font-size:15px; }
+@media (max-width:900px) { .safe-grid { grid-template-columns:1fr 1fr; } }
+@media (max-width:560px) { .safe-grid { grid-template-columns:1fr; } .dese { flex-direction:column; text-align:center; } .dese .pills { justify-content:center; } }
+
+/* ── Pricing: pick your pack ── */
+.plans { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-top:36px; align-items:stretch; }
+.plan { background:var(--mq-card); border:2px solid var(--mq-line); border-bottom-width:7px; border-radius:28px; padding:26px 22px; display:flex; flex-direction:column; position:relative; }
+.plan.best { border-color:var(--mq-gold); background:linear-gradient(180deg, rgba(255,200,61,0.1), var(--mq-card) 40%); }
+.ribbon { position:absolute; top:-16px; left:50%; transform:translateX(-50%); background:var(--mq-gold); color:var(--mq-ink); font-weight:700; font-size:14px; padding:5px 14px; border-radius:99px; box-shadow:0 4px 0 var(--mq-gold-dark); white-space:nowrap; }
+.plan .ico { font-size:44px; }
+.plan h3 { font-size:24px; margin-top:4px; }
+.price { font-size:48px; font-weight:700; line-height:1.1; margin:6px 0 2px; }
+.price small { font-size:18px; color:var(--mq-text-2); font-weight:500; }
+.plan .desc { color:var(--mq-text-2); font-size:16px; }
+.plan ul { list-style:none; margin:16px 0 22px; display:grid; gap:8px; flex:1; }
+.plan li { display:flex; gap:10px; font-size:16px; }
+.plan li::before { content:'✓'; color:var(--mq-primary); font-weight:700; }
+.plan li.no { color:var(--mq-text-2); } .plan li.no::before { content:'–'; color:var(--mq-text-2); }
+.plan .btn { width:100%; }
+.billing-note { margin-top:18px; text-align:center; color:var(--mq-text-2); font-size:15px; }
+@media (max-width:900px) { .plans { grid-template-columns:1fr; max-width:480px; margin-left:auto; margin-right:auto; } }
+
+/* ── FAQ ── */
+.faq { max-width:760px; margin:30px auto 0; display:grid; gap:10px; }
+.faq details { background:var(--mq-card); border:2px solid var(--mq-line); border-radius:18px; }
+.faq summary { cursor:pointer; list-style:none; padding:16px 50px 16px 18px; font-weight:600; font-size:18px; position:relative; min-height:44px; }
+.faq summary::-webkit-details-marker { display:none; }
+.faq summary::after { content:'+'; position:absolute; right:18px; top:50%; transform:translateY(-50%); width:28px; height:28px; border-radius:50%; background:var(--mq-card-2); display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--mq-gold); }
+.faq details[open] summary::after { content:'–'; }
+.faq details p { padding:0 18px 16px; color:var(--mq-text-2); }
+
+/* ── Final CTA: the treasure at the end of the map ── */
+.finale { text-align:center; padding:80px 0 90px; }
+.treasure { font-size:90px; line-height:1; animation:bob 2.2s ease-in-out infinite; }
+.finale .sec-lead { margin:0 auto; }
+.finale .cta-row { justify-content:center; }
+
+footer { border-top:2px solid var(--mq-line); padding:30px 0 40px; color:var(--mq-text-2); font-size:15px; }
+footer .wrap { display:flex; flex-wrap:wrap; gap:14px 24px; align-items:center; justify-content:space-between; }
+footer nav ul { display:flex; flex-wrap:wrap; gap:4px 8px; list-style:none; }
+footer nav a { text-decoration:none; padding:10px; display:inline-block; }
+footer nav a:hover { color:var(--mq-text); }
+.foot-brand { display:flex; align-items:center; gap:10px; }
+.foot-brand svg { width:32px; height:32px; }
+
+/* ── Motion ── */
+.reveal { opacity:0; transform:translateY(22px); transition:opacity .6s ease, transform .6s ease; }
+.reveal.in { opacity:1; transform:none; }
+@keyframes bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-8px); } }
+@keyframes pulse { 0%,100% { box-shadow:0 6px 0 rgba(0,0,0,0.35), 0 0 0 0 rgba(255,255,255,0.45); } 50% { box-shadow:0 6px 0 rgba(0,0,0,0.35), 0 0 0 12px rgba(255,255,255,0); } }
+@keyframes pop { from { opacity:0; transform:translateY(8px) scale(.98); } to { opacity:1; transform:none; } }
+@keyframes star { from { transform:scale(0) rotate(-40deg); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes shake { 0%,100% { transform:translateX(0) rotate(0); } 25% { transform:translateX(-5px) rotate(-6deg); } 75% { transform:translateX(5px) rotate(6deg); } }
+@keyframes fall { to { transform:translateY(560px) rotate(720deg); opacity:.2; } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto; }
+  *, *::before, *::after { animation:none !important; transition:none !important; }
+  .reveal { opacity:1; transform:none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Logo mark, defined once and reused -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="mq-mark" viewBox="0 0 64 64"><circle cx="32" cy="32" r="31" fill="#E8A317"/><circle cx="32" cy="30.5" r="29.5" fill="#FFC83D"/><circle cx="32" cy="31" r="24.5" fill="none" stroke="#E8A317" stroke-width="2.5"/><path d="M14.5 28 16.5 11 29.5 19ZM49.5 28 47.5 11 34.5 19Z" fill="#F2618D"/><ellipse cx="32" cy="34.5" rx="19.5" ry="17" fill="#FF9CB8"/><circle cx="23.5" cy="29" r="3" fill="#0E1433"/><circle cx="40.5" cy="29" r="3" fill="#0E1433"/><ellipse cx="32" cy="40" rx="10" ry="7" fill="#F2618D"/><ellipse cx="28.5" cy="40" rx="2.1" ry="3" fill="#0E1433"/><ellipse cx="35.5" cy="40" rx="2.1" ry="3" fill="#0E1433"/><path d="m32 2.2 2.2 4.4 4.9.7-3.5 3.4.8 4.8-4.4-2.3-4.4 2.3.8-4.8-3.5-3.4 4.9-.7z" fill="#fff" stroke="#E8A317" stroke-width="1.2" stroke-linejoin="round"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hud">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Money Quest by InvestEd Pro, home">
+      <svg aria-hidden="true"><use href="#mq-mark"/></svg>
+      <span><span class="brand-name">Money <span class="q">Quest</span></span><span class="brand-by">by InvestEd Pro</span></span>
+    </a>
+    <nav aria-label="Page sections">
+      <ul class="hud-links">
+        <li><a href="#play">Try it</a></li>
+        <li><a href="#tracks">Tracks</a></li>
+        <li><a href="#city">Money City</a></li>
+        <li><a href="#grownups">Parents &amp; Teachers</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+      </ul>
+    </nav>
+    <a class="hud-signin" href="app.html">Sign in</a>
+    <a class="btn btn-go btn-sm" href="app.html">Play free</a>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ── HERO ── -->
+<section class="hero" id="top" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div>
+      <span class="chip"><b>🐷 Penny</b> Your money coach is ready</span>
+      <h1 id="hero-title">Level up your <span class="gold">money</span> skills. <span class="green">One quest at a time.</span></h1>
+      <p class="lead">School teaches almost everything except how money actually works. <strong>Money Quest</strong> turns saving, budgeting, credit and investing into a game kids and teens <strong>want</strong> to play: 5-minute lessons, stars, stickers and a city to invest in.</p>
+      <div class="cta-row">
+        <a class="btn btn-go" href="app.html">🚀 Start the quest, free</a>
+        <a class="btn btn-ghost" href="#play">🎮 Play a level here ↓</a>
+      </div>
+      <p class="hero-note"><span>No card needed</span><span>No ads, ever</span><span>Phones, tablets &amp; Chromebooks</span></p>
+    </div>
+
+    <div class="phone-stage" aria-hidden="true">
+      <div class="float f1">🔥 5-day streak<small>Shields keep it safe</small></div>
+      <div class="float f2">⭐⭐⭐ +115 XP<small>Perfect lesson!</small></div>
+      <div class="float f3">💵 +$1,000<small>Sim cash for Money City</small></div>
+      <div class="phone">
+        <div class="p-hud"><span class="p-stat">🔥 5</span><span class="p-stat">🪙 120</span><span class="p-stat">⭐ 14</span><span class="p-stat">🏅 3</span></div>
+        <div class="p-world">🏰<span>World 1: Coin Castle<small>Coins, counting &amp; saving</small></span></div>
+        <div class="p-path">
+          <div class="p-node done">🪙</div>
+          <div class="p-node done">🐷</div>
+          <div class="p-node next">🏦</div>
+          <div class="p-node lock">🔒</div>
+        </div>
+        <div class="p-nav"><span class="on">🗺️</span><span>🏙️</span><span>📒</span><span>📚</span><span>🏆</span></div>
+      </div>
+      <div class="penny-bubble"><span class="bub">Oink! Tap START!</span><svg><use href="#mq-mark"/></svg></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── STAT STRIP ── -->
+<div class="strip">
+  <div class="wrap">
+    <ul>
+      <li><b>52</b><span>Game lessons</span></li>
+      <li><b>16</b><span>Worlds to explore</span></li>
+      <li><b>30</b><span>Stickers to collect</span></li>
+      <li><b>$0</b><span>Real money at risk</span></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── LEVEL 1: PLAY A DEMO ── -->
+<section id="play" aria-labelledby="play-title">
+  <div class="wrap center reveal">
+    <span class="level-tag"><i>1</i> Level 1</span>
+    <h2 id="play-title">Don't take our word for it. <span class="green">Play a level.</span></h2>
+    <p class="sec-lead">Three real questions from the game. Miss one? Fix-It brings it back until you get it right, just like in the app.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="demo reveal" id="demo">
+      <div class="demo-tabs" role="group" aria-label="Choose a track">
+        <button type="button" class="demo-tab" data-track="junior" aria-pressed="true">🧒 Junior (6–11)</button>
+        <button type="button" class="demo-tab" data-track="pro" aria-pressed="false">🎓 Pro (teens)</button>
+      </div>
+      <div class="demo-top">
+        <div class="bar" role="progressbar" aria-label="Level progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="demo-bar"></i></div>
+        <div class="xp" id="demo-xp" aria-live="polite">⭐ 0 XP</div>
+      </div>
+      <div id="demo-body"></div>
+      <div id="demo-live" class="sr-only" aria-live="assertive"></div>
+    </div>
+  </div>
+</section>
+
+<div class="trail" aria-hidden="true"></div>
+
+<!-- ── LEVEL 2: TRACKS ── -->
+<section id="tracks" aria-labelledby="tracks-title">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="level-tag"><i>2</i> Level 2</span>
+      <h2 id="tracks-title">Choose your <span class="gold">quest</span>.</h2>
+      <p class="sec-lead">Two tracks with the same game, the same rewards and the same Money City. Switch any time.</p>
+    </div>
+
+    <div class="tracks-grid">
+      <article class="track jr reveal">
+        <div class="track-head">
+          <div class="track-avatar" aria-hidden="true">🧒</div>
+          <div><h3>Junior Quest</h3><div class="age">Ages 6–11 · Families &amp; elementary classrooms</div></div>
+        </div>
+        <p>Friendly, bite-size lessons about coins, saving, needs vs. wants and earning. Every card can be read aloud, so early readers can play on their own.</p>
+        <ul class="worlds" aria-label="Junior worlds">
+          <li style="background:var(--mq-w-amber)">🏰 Coin Castle</li>
+          <li style="background:var(--mq-w-green)">🌲 Want Woods</li>
+          <li style="background:var(--mq-w-blue)">🌊 Savings Sea</li>
+          <li style="background:var(--mq-w-purple)">⛰️ Earning Mountain</li>
+          <li style="background:var(--mq-w-teal)">🏙️ Smart Money City</li>
+        </ul>
+        <ul class="perks">
+          <li>5 worlds, 20 lessons</li>
+          <li>Read-aloud 🔊 on every card and question</li>
+          <li>A savings jar that shows how interest grows</li>
+        </ul>
+        <a class="btn btn-go" href="app.html">Play Junior Quest</a>
+      </article>
+
+      <article class="track pro reveal">
+        <div class="track-head">
+          <div class="track-avatar" aria-hidden="true">🎓</div>
+          <div><h3>Pro Quest</h3><div class="age">Teens · High-school Personal Finance</div></div>
+        </div>
+        <p>The Missouri DESE Personal Finance course, covering budgeting, saving, banking, credit, loans and investing, in the same game format.</p>
+        <ul class="worlds" aria-label="Pro topics">
+          <li style="background:var(--mq-w-blue)">🏦 Banking</li>
+          <li style="background:var(--mq-w-green)">📊 Budgeting</li>
+          <li style="background:var(--mq-w-purple)">💳 Credit</li>
+          <li style="background:var(--mq-w-amber)">🪙 Saving</li>
+          <li style="background:var(--mq-w-teal)">📈 Investing</li>
+          <li style="background:var(--mq-w-berry)">🏠 Real Estate</li>
+        </ul>
+        <ul class="perks">
+          <li>11 worlds, 32 lessons, DESE aligned</li>
+          <li>6-question quizzes: multiple choice, true/false, sort, match and order</li>
+          <li>Every lesson funds real practice in Money City</li>
+        </ul>
+        <a class="btn btn-info" href="app.html">Play Pro Quest</a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<div class="trail" aria-hidden="true"></div>
+
+<!-- ── LEVEL 3: THE LOOP ── -->
+<section id="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="level-tag"><i>3</i> Level 3</span>
+      <h2 id="how-title">Learn it. Try it. <span class="gold">Fix it.</span> Earn it.</h2>
+      <p class="sec-lead">Every lesson takes about five minutes and follows the same loop, so kids always know what comes next.</p>
+    </div>
+    <ol class="loop reveal" style="list-style:none">
+      <li class="step"><div class="step-node" style="background:var(--mq-w-blue)" aria-hidden="true">📖</div><small>Step 1</small><h3>Learn</h3><p>Short cards with Penny explain one idea at a time.</p></li>
+      <li class="step"><div class="step-node" style="background:var(--mq-w-purple)" aria-hidden="true">🎯</div><small>Step 2</small><h3>Quiz</h3><p>Six quick questions check what stuck.</p></li>
+      <li class="step"><div class="step-node" style="background:var(--mq-try)" aria-hidden="true">🔧</div><small>Step 3</small><h3>Fix-It</h3><p>Missed questions come back until they're right. Miss a lot? Retake the lesson.</p></li>
+      <li class="step"><div class="step-node" style="background:linear-gradient(180deg,#FFD84D,var(--mq-gold-dark))" aria-hidden="true">⭐</div><small>Step 4</small><h3>Earn</h3><p>Stars, XP, sim cash and a mystery-gift sticker.</p></li>
+    </ol>
+    <ul class="rewards reveal" aria-label="Rewards in the game">
+      <li>⚡ XP &amp; levels</li><li>⭐ Stars</li><li>🔥 Forgiving streaks with 🛡️ shields</li><li>🎯 Daily goal</li><li>🎁 30-sticker book</li><li>🫙 Savings jar</li>
+    </ul>
+  </div>
+</section>
+
+<div class="trail" aria-hidden="true"></div>
+
+<!-- ── LEVEL 4: MONEY CITY ── -->
+<section id="city" aria-labelledby="city-title">
+  <div class="wrap city">
+    <div class="reveal">
+      <span class="level-tag"><i>4</i> Level 4</span>
+      <h2 id="city-title">Lessons turn into <span class="green">sim cash</span>. Sim cash builds a city.</h2>
+      <p class="sec-lead">Every finished lesson adds pretend dollars to spend in Money City, a practice world with real market prices and zero real money.</p>
+      <div class="flow" aria-label="Finish a lesson, earn sim cash, invest in Money City">
+        <span>📘 Finish a lesson</span><span class="arrow" aria-hidden="true">➜</span><span class="cash">💵 +$500 to $1,000</span><span class="arrow" aria-hidden="true">➜</span><span>🏙️ Invest</span>
+      </div>
+      <p class="city-note">Real Estate License: finish 5 real-estate lessons, pass the 20-question exam with 75%, and earn an honorary certificate that unlocks selling property.</p>
+    </div>
+    <div class="skyline reveal">
+      <article class="bldg tall b1"><div class="ico" aria-hidden="true">📈</div><h3>Stocks</h3><p>Trade real tickers like AAPL and VOO at live prices.</p></article>
+      <article class="bldg mid b2"><div class="ico" aria-hidden="true">₿</div><h3>Crypto</h3><p>Top 30 coins, fractional buys, 24h change.</p></article>
+      <article class="bldg low b3"><div class="ico" aria-hidden="true">💰</div><h3>Bonds</h3><p>T-Bills, munis, TIPS. Collect interest.</p></article>
+      <article class="bldg low b4"><div class="ico" aria-hidden="true">🏠</div><h3>Real Estate</h3><p>Practice homes at real addresses on a live map. Rent, flip or wholesale.</p></article>
+      <article class="bldg tall b5"><div class="ico" aria-hidden="true">👛</div><h3>Wallet</h3><p>Net worth, cash and gains in one place.</p></article>
+      <article class="bldg mid b6"><div class="ico" aria-hidden="true">🏦</div><h3>Loans</h3><p>See how interest and payments really work.</p></article>
+    </div>
+  </div>
+</section>
+
+<div class="trail" aria-hidden="true"></div>
+
+<!-- ── LEVEL 5: GROWN-UPS ── -->
+<section id="grownups" aria-labelledby="safe-title">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="level-tag"><i>5</i> For grown-ups</span>
+      <h2 id="safe-title">Built to teach, <span class="green">not to hook.</span></h2>
+      <p class="sec-lead">Game rewards pull kids in. Our rules make sure the fun always points back at learning.</p>
+    </div>
+    <div class="safe-grid">
+      <div class="safe reveal"><div class="ico" aria-hidden="true">🚫</div><h3>No ads</h3><p>Nothing is ever advertised to your child.</p></div>
+      <div class="safe reveal"><div class="ico" aria-hidden="true">🛒</div><h3>No in-game purchases</h3><p>Stickers, stars and sim cash are earned by learning, never bought.</p></div>
+      <div class="safe reveal"><div class="ico" aria-hidden="true">🙅</div><h3>No leaderboards</h3><p>Kids compete only against their own best.</p></div>
+      <div class="safe reveal"><div class="ico" aria-hidden="true">⏸️</div><h3>Break reminders</h3><p>A gentle nudge after 15 minutes, and streaks that forgive a missed day.</p></div>
+    </div>
+    <div class="dese reveal">
+      <div class="badge" aria-hidden="true">🎓</div>
+      <div>
+        <h3>Pro Quest meets Missouri's graduation requirement</h3>
+        <p>Starting with the 2025–26 school year, every Missouri high-school student needs a 0.5-credit standalone Personal Finance course to graduate. Pro Quest is built around the Missouri DESE Personal Finance Course-Level Expectations.</p>
+        <ul class="pills"><li>DESE aligned</li><li>Missouri SB 1</li><li>Grades 9–12</li><li>0.5 credit</li><li>CTE eligible</li></ul>
+      </div>
+    </div>
+    <p class="pretend">All money in the game is pretend. Money City uses sim cash only. For educational use, not investment advice.</p>
+  </div>
+</section>
+
+<div class="trail" aria-hidden="true"></div>
+
+<!-- ── LEVEL 6: PRICING ── -->
+<section id="pricing" aria-labelledby="price-title">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="level-tag"><i>6</i> Pricing</span>
+      <h2 id="price-title">Start at <span class="gold">$0</span>. Upgrade when you're ready.</h2>
+    </div>
+    <div class="plans">
+      <article class="plan reveal">
+        <div class="ico" aria-hidden="true">🪙</div>
+        <h3>Free Trial</h3>
+        <div class="price">$0</div>
+        <p class="desc">Limited access, no card required</p>
+        <ul>
+          <li>5 introductory lessons</li>
+          <li>Stock simulator (10 tickers)</li>
+          <li>Financial dictionary</li>
+          <li class="no">Crypto, bonds &amp; real estate</li>
+          <li class="no">Progress cloud sync</li>
+          <li class="no">Real Estate License exam</li>
+        </ul>
+        <a class="btn btn-ghost" href="app.html">Try for free</a>
+      </article>
+      <article class="plan best reveal">
+        <span class="ribbon">⭐ Most popular</span>
+        <div class="ico" aria-hidden="true">💎</div>
+        <h3>Full Access</h3>
+        <div class="price">$10<small>/mo</small></div>
+        <p class="desc">Every world, every simulator tab</p>
+        <ul>
+          <li>Both tracks: Junior + Pro (52 lessons)</li>
+          <li>Live stocks, crypto (top 30), bonds, MLS</li>
+          <li>Real estate with tenants &amp; flipping</li>
+          <li>Real Estate License course + exam</li>
+          <li>Progress synced across devices</li>
+          <li>Priority support</li>
+        </ul>
+        <a class="btn btn-gold" href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" rel="noopener">Get Full Access</a>
+      </article>
+      <article class="plan reveal">
+        <div class="ico" aria-hidden="true">🏫</div>
+        <h3>Classroom</h3>
+        <div class="price" style="font-size:38px">Let's talk</div>
+        <p class="desc">Elementary, high schools &amp; districts</p>
+        <ul>
+          <li>Everything in Full Access</li>
+          <li>Bulk student access codes</li>
+          <li>Teacher dashboard (coming soon)</li>
+          <li>DESE alignment documentation</li>
+          <li>Custom onboarding session</li>
+          <li>Volume pricing</li>
+        </ul>
+        <a class="btn btn-info" href="mailto:merrick.fluellen@gmail.com?subject=Money%20Quest%20for%20my%20classroom">Contact us</a>
+      </article>
+    </div>
+    <p class="billing-note">Subscriptions are handled by a parent, teacher or account owner here, never inside the game.</p>
+  </div>
+</section>
+
+<!-- ── FAQ ── -->
+<section id="faq" aria-labelledby="faq-title" style="padding-top:20px">
+  <div class="wrap">
+    <div class="center reveal"><h2 id="faq-title">Questions from grown-ups</h2></div>
+    <div class="faq">
+      <details class="reveal"><summary>Is any real money involved?</summary><p>No. Coins, stars and Money City dollars are all pretend. Money City uses real market prices so the practice feels real, but nothing is ever bought or sold with real money.</p></details>
+      <details class="reveal"><summary>What ages is it for?</summary><p>Junior Quest is for ages 6–11 and every card can be read aloud. Pro Quest is for teens and follows the Missouri high-school Personal Finance course. Each player picks a track and can switch any time.</p></details>
+      <details class="reveal"><summary>What devices does it work on?</summary><p>Anything with a modern web browser: phones, tablets, Chromebooks, Macs and PCs. You can also add it to your home screen like an app. Nothing to install.</p></details>
+      <details class="reveal"><summary>How long does a lesson take?</summary><p>About five minutes. A daily goal is roughly one or two lessons, and the game suggests a break after 15 minutes of play.</p></details>
+      <details class="reveal"><summary>Can teachers assign specific units?</summary><p>Yes. In Pro Quest the first lesson of every world is open, so a class can start on any unit, such as credit or investing, on day one.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- ── FINALE ── -->
+<section class="finale" aria-labelledby="finale-title">
+  <div class="wrap reveal">
+    <div class="treasure" aria-hidden="true">🎁</div>
+    <h2 id="finale-title">The best time to learn about money is <span class="gold">before you have any.</span></h2>
+    <p class="sec-lead">Money habits grow like compound interest: the earlier they start, the bigger they get. Start with one five-minute lesson with Penny today.</p>
+    <div class="cta-row">
+      <a class="btn btn-go" href="app.html">🚀 Start learning free</a>
+      <a class="btn btn-gold" href="https://buy.stripe.com/8x23cv7hc1uKdnB1QF1ZS00" rel="noopener">Subscribe for $10/mo</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-brand"><svg aria-hidden="true"><use href="#mq-mark"/></svg><span>© 2026 Money Quest by InvestEd Pro · Merrick Fluellen<br>For educational use only. Not investment advice.</span></div>
+    <nav aria-label="Footer"><ul><li><a href="app.html">Open the app</a></li><li><a href="#pricing">Pricing</a></li><li><a href="#faq">FAQ</a></li><li><a href="mailto:merrick.fluellen@gmail.com">Contact</a></li></ul></nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // ── Scroll reveal ──
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var els = document.querySelectorAll('.reveal');
+  if (reduce || !('IntersectionObserver' in window)) { els.forEach(function (el) { el.classList.add('in'); }); }
+  else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+    els.forEach(function (el) { io.observe(el); });
+  }
+
+  // ── Playable demo level ──
+  var BANK = {
+    junior: [
+      { q: 'Which one is a NEED?', o: ['🍎 Healthy food', '🎮 A new video game', '🍭 A bag of candy'], a: 0,
+        why: 'Needs are things we must have to live, like food, water and a home. Wants are fun extras.' },
+      { q: 'You save 5 coins every week. How many coins after 4 weeks?', o: ['9 coins', '20 coins', '54 coins'], a: 1,
+        why: '5 + 5 + 5 + 5 = 20. Saving a little every week adds up!' },
+      { q: 'Where can your money earn interest?', o: ['Under your bed', 'In a savings account at a bank', 'In your coat pocket'], a: 1,
+        why: 'A bank pays you interest to keep your money there. Money under the bed never grows.' }
+    ],
+    pro: [
+      { q: 'You invest $1,000 and earn about 7% a year. Roughly how much do you have after 10 years?', o: ['$1,070', '$1,700', 'About $1,970'], a: 2,
+        why: 'Compound interest: at 7% money roughly doubles in about 10 years (Rule of 72: 72 ÷ 7 ≈ 10).' },
+      { q: 'You only pay the minimum on a credit card each month. What usually happens?', o: ['The balance is gone in a few months', 'Interest keeps piling up and it can take years to pay off', 'The card company lowers your interest rate'], a: 1,
+        why: 'Minimum payments mostly cover interest, so the balance shrinks very slowly. Pay the full balance when you can.' },
+      { q: 'Which of these is usually the LOWEST risk?', o: ['A U.S. Treasury bond', 'One new tech stock', 'A brand-new cryptocurrency'], a: 0,
+        why: 'Treasury bonds are backed by the U.S. government, so they are among the safest investments, with lower returns to match.' }
+    ]
+  };
+  var CHEER = ['Oink-credible!', 'Cha-ching! Nailed it!', 'Smart thinking!', "You're on a roll!"];
+  var OOPS = ["Almost! Let's look together.", 'Good try! Here is the answer.', 'Mistakes help your brain grow! 🌱'];
+  var STICKERS = [['🦉', 'Wise Owl'], ['🐢', 'Patient Turtle'], ['🌱', 'Money Sprout'], ['🦊', 'Clever Fox'], ['🚀', 'Rocket Saver'], ['💎', 'Shiny Gem']];
+  var body = document.getElementById('demo-body'), bar = document.getElementById('demo-bar'),
+      barWrap = bar.parentNode, xpEl = document.getElementById('demo-xp'), live = document.getElementById('demo-live'),
+      demo = document.getElementById('demo');
+  var S;
+  function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function beep(ok) {
+    try {
+      var C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+      S.ctx = S.ctx || new C();
+      (ok ? [660, 880] : [330, 262]).forEach(function (f, i) {
+        var o = S.ctx.createOscillator(), g = S.ctx.createGain(), t = S.ctx.currentTime + i * 0.09;
+        o.type = ok ? 'sine' : 'triangle'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+        o.connect(g); g.connect(S.ctx.destination); o.start(t); o.stop(t + 0.26);
+      });
+    } catch (e) {}
+  }
+  function reset(track) {
+    var ctx = S && S.ctx;
+    S = { track: track, queue: [0, 1, 2], pos: 0, missed: [], fixing: false, xp: 0, combo: 0, sel: null, ctx: ctx };
+    render();
+  }
+  function setBar() {
+    var total = S.fixing ? S.queue.length : 3;
+    var pct = S.done ? 100 : (S.pos / total) * 100;
+    bar.style.width = pct + '%';
+    bar.style.background = S.fixing && !S.done ? 'var(--mq-try)' : '';
+    barWrap.setAttribute('aria-valuenow', Math.round(pct));
+    xpEl.textContent = '⭐ ' + S.xp + ' XP';
+  }
+  function render() {
+    setBar();
+    if (S.done) return renderDone();
+    var q = BANK[S.track][S.queue[S.pos]];
+    var tag = S.fixing ? '<span class="q-tag fix">🔧 Fix-It Mode</span>' : '<span class="q-tag">🎯 Question ' + (S.pos + 1) + ' of 3</span>';
+    var html = tag + '<p class="q-text" id="q-text">' + esc(q.q) + '</p><div class="opts" role="group" aria-labelledby="q-text">';
+    q.o.forEach(function (o, i) { html += '<button type="button" class="opt" data-i="' + i + '" aria-pressed="false">' + esc(o) + '</button>'; });
+    html += '</div><button type="button" class="btn btn-go" id="check" disabled>Check</button>';
+    body.innerHTML = html;
+    body.querySelectorAll('.opt').forEach(function (b) {
+      b.addEventListener('click', function () {
+        S.sel = +b.getAttribute('data-i');
+        body.querySelectorAll('.opt').forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        document.getElementById('check').disabled = false;
+      });
+    });
+    document.getElementById('check').addEventListener('click', check);
+  }
+  function check() {
+    var qi = S.queue[S.pos], q = BANK[S.track][qi], ok = S.sel === q.a;
+    body.querySelectorAll('.opt').forEach(function (b, i) {
+      b.disabled = true;
+      if (i === q.a) { b.classList.add('right'); b.insertAdjacentHTML('beforeend', '<span class="mark" aria-hidden="true">✅</span>'); }
+      else if (i === S.sel) { b.classList.add('wrong'); b.insertAdjacentHTML('beforeend', '<span class="mark" aria-hidden="true">💡</span>'); }
+    });
+    document.getElementById('check').remove();
+    if (ok) { S.combo++; S.xp += S.fixing ? 5 : 10 + (S.combo >= 3 ? 5 : 0); }
+    else { S.combo = 0; if (!S.fixing && S.missed.indexOf(qi) < 0) S.missed.push(qi); if (S.fixing) S.queue.push(qi); }
+    beep(ok);
+    S.pos++;
+    setBar();
+    var head = ok ? '🎉 ' + pick(CHEER) : '💡 ' + pick(OOPS);
+    var ans = ok ? '' : '<p><b>Answer: ' + esc(q.o[q.a]) + '</b></p>';
+    body.insertAdjacentHTML('beforeend', '<div class="fb ' + (ok ? 'ok' : 'no') + '"><h3>' + head + '</h3>' + ans + '<p>' + esc(q.why) + '</p><button type="button" class="btn btn-go" id="next">Continue</button></div>');
+    live.textContent = (ok ? 'Correct! ' : 'Not quite. The answer is ' + q.o[q.a] + '. ') + q.why;
+    var nx = document.getElementById('next'); nx.focus({ preventScroll: true });
+    nx.addEventListener('click', advance);
+  }
+  function advance() {
+    S.sel = null;
+    if (S.pos >= S.queue.length) {
+      if (!S.fixing && S.missed.length) { S.fixing = true; S.queue = S.missed.slice(); S.pos = 0; return renderFixIntro(); }
+      S.done = true;
+    }
+    render();
+    var first = body.querySelector('.opt, .gift, .btn'); if (first) first.focus({ preventScroll: true });
+  }
+  function renderFixIntro() {
+    setBar();
+    var n = S.missed.length;
+    body.innerHTML = '<div class="done"><div style="font-size:64px" aria-hidden="true">🔧</div><h3 style="font-size:26px">Fix-It Time!</h3><p style="color:var(--mq-text-2);margin:6px 0 4px">You missed ' + n + ' question' + (n === 1 ? '' : 's') + ". Let's fix " + (n === 1 ? 'it' : 'them') + ' together.</p><button type="button" class="btn btn-go" id="fixgo" style="background:var(--mq-try);box-shadow:0 5px 0 var(--mq-try-dark)">Fix my mistakes 🔧</button></div>';
+    var b = document.getElementById('fixgo'); b.focus({ preventScroll: true });
+    b.addEventListener('click', function () { render(); var f = body.querySelector('.opt'); if (f) f.focus({ preventScroll: true }); });
+  }
+  function renderDone() {
+    var m = S.missed.length, stars = m === 0 ? 3 : m === 1 ? 2 : 1;
+    S.xp += 20 + (m === 0 ? 15 : 0);
+    setBar();
+    var st = '';
+    for (var i = 1; i <= 3; i++) st += '<span class="' + (i <= stars ? '' : 'off') + '" style="animation-delay:' + (i * 0.2) + 's">⭐</span>';
+    body.innerHTML = '<div class="done"><div class="stars" aria-label="' + stars + ' of 3 stars">' + st + '</div><h3 style="font-size:28px;margin-top:4px">' + (m === 0 ? 'PERFECT LEVEL!' : 'Level complete!') + '</h3>' +
+      '<p style="color:var(--mq-text-2)">+' + S.xp + ' XP' + (m ? ' · You fixed every mistake 💪' : ' · Every answer right the first time!') + '</p>' +
+      '<div id="gift-zone" style="margin-top:10px"><button type="button" class="gift" id="gift" aria-label="Open your mystery gift">🎁</button><p style="color:var(--mq-text-2);font-weight:600">Tap the mystery gift! 👆</p></div></div>';
+    live.textContent = 'Level complete. ' + stars + ' stars. Open your mystery gift.';
+    document.getElementById('gift').addEventListener('click', function () {
+      var g = this; if (g.disabled) return; g.disabled = true; g.classList.add('shake');
+      setTimeout(function () {
+        var p = pick(STICKERS);
+        document.getElementById('gift-zone').innerHTML = '<div class="prize" aria-hidden="true">' + p[0] + '</div><p style="font-weight:700;font-size:20px">New sticker: ' + p[1] + '!</p>' +
+          '<p style="color:var(--mq-text-2);margin:6px 0 4px">There are 29 more to collect in the real game, plus 52 lessons and Money City.</p>' +
+          '<a class="btn btn-go" href="app.html" id="keep">Keep playing in the app 🚀</a>' +
+          '<button type="button" class="btn btn-ghost" id="again" style="margin-top:12px">Play again</button>';
+        live.textContent = 'You got a new sticker: ' + p[1] + '.';
+        confetti();
+        document.getElementById('keep').focus({ preventScroll: true });
+        document.getElementById('again').addEventListener('click', function () { reset(S.track); });
+      }, 800);
+    });
+  }
+  function confetti() {
+    if (reduce) return;
+    var c = document.createElement('div'); c.className = 'confetti'; c.setAttribute('aria-hidden', 'true');
+    var cols = ['#FFC83D', '#43C463', '#3BA9F5', '#FF9CB8', '#B69CFF', '#FF9F1C'];
+    for (var i = 0; i < 36; i++) {
+      var s = document.createElement('i');
+      s.style.left = (i * 97 % 100) + '%'; s.style.background = cols[i % 6];
+      s.style.animationDelay = (i % 12) * 0.07 + 's'; s.style.animationDuration = (1.6 + (i % 5) * 0.25) + 's';
+      c.appendChild(s);
+    }
+    demo.appendChild(c); setTimeout(function () { c.remove(); }, 3200);
+  }
+  document.querySelectorAll('.demo-tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.demo-tab').forEach(function (x) { x.setAttribute('aria-pressed', x === t ? 'true' : 'false'); });
+      reset(t.getAttribute('data-track'));
+    });
+  });
+  reset('junior');
+})();
+</script>
+</body>
+</html>

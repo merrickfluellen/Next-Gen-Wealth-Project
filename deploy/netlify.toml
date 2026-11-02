@@ -1,0 +1,58 @@
+[build]
+  functions = "netlify/functions"
+
+# SITE_URL and RESEND_FROM are intentionally public (site URL + from-email address)
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "SITE_URL,RESEND_FROM"
+
+# ── Canonical redirect: www → non-www (SEO) ──────────────────────────────────
+[[redirects]]
+  from = "https://www.nextgenwealthproject.netlify.app/*"
+  to = "https://nextgenwealthproject.netlify.app/:splat"
+  status = 301
+  force = true
+
+# ── Old landing page → current homepage (its feature list is out of date) ──────
+[[redirects]]
+  from = "/landing.html"
+  to = "/"
+  status = 301
+  force = true
+
+# ── HTML pages: never cache — users see changes on a normal F5 refresh ─────────
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+[[headers]]
+  for = "/app.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+[[headers]]
+  for = "/landing.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+# ── Netlify functions: never cache ────────────────────────────────────────────
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# ── Security + CSP headers for everything ────────────────────────────────────
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://picsum.photos https://tile.openstreetmap.org https://api.maptiler.com https://tiles.stadiamaps.com; connect-src 'self' https://vtxuvmtnqlxidnswnunx.supabase.co https://overpass-api.de https://overpass.private.coffee https://api.ipify.org https://docs.google.com; frame-src https://docs.google.com; object-src 'none'; base-uri 'self';"
